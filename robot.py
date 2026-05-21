@@ -14,6 +14,7 @@ from Lexxue_api import ck, xd, cs
 from wx import WxAdapter as Wcf
 from wx import WxMsg
 from router.dispatch import Dispatcher
+from router.order import OrderHandler
 from router.template import TemplateMatcher
 
 from base.func_bard import BardAssistant
@@ -28,22 +29,6 @@ from constants import ChatType
 from job_mgmt import Job
 
 __version__ = "39.0.10.1"
-
-
-class NullOrderHandler:
-    """Placeholder until OrderHandler is added in Phase 4."""
-
-    def is_pending_for(self, wxid: str) -> bool:
-        return False
-
-    def looks_like_order_intent(self, text: str) -> bool:
-        return False
-
-    def on_user_reply(self, msg) -> None:
-        pass
-
-    def handle_new_order_message(self, msg) -> None:
-        pass
 
 
 class Robot(Job):
@@ -108,10 +93,21 @@ class Robot(Job):
             images_path=Path("关键词发图.json"),
             menus_path=Path("菜单格式.json"),
         )
+        intent_prompt = Path(self.config.LLM["intent_prompt_path"]).read_text(encoding="utf-8")
+        extract_prompt = Path(self.config.LLM["extract_prompt_path"]).read_text(encoding="utf-8")
+        order_handler = OrderHandler(
+            lexue_creds=self.config.LEXUE,
+            llm=self.chat,
+            wx=self.wcf,
+            safety=self.config.ORDER_SAFETY,
+            audit_log_path=Path("logs/audit/orders.jsonl"),
+            intent_prompt=intent_prompt,
+            extract_prompt=extract_prompt,
+        )
         self.dispatcher = Dispatcher(
             wx=self.wcf,
             template_matcher=self.template_matcher,
-            order_handler=NullOrderHandler(),   # replaced in Phase 4
+            order_handler=order_handler,
             llm=self.chat,
             groups_allowed=set(self.config.GROUPS or []),
         )

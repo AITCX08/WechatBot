@@ -39,6 +39,7 @@ def main(chat_type: int):
     wcf.setup()
 
     def handler(sig, frame):
+        wcf.cleanup()
         exit(0)
 
     signal.signal(signal.SIGINT, handler)

@@ -3,12 +3,13 @@
 
 import signal
 from argparse import ArgumentParser
+from pathlib import Path
 
 from base.func_report_reminder import ReportReminder
 from configuration import Config
 from constants import ChatType
 from robot import Robot, __version__
-from wcferry import Wcf
+from wx import WxAdapter
 
 
 def weather_report(robot: Robot) -> None:
@@ -28,10 +29,16 @@ def weather_report(robot: Robot) -> None:
 
 def main(chat_type: int):
     config = Config()
-    wcf = Wcf(debug=True)
+    wcf = WxAdapter(
+        weixin_exe=Path(config.WEIXIN.get("exe", "")),
+        sidecar_url=config.WEIXIN.get("sidecar_url", "http://127.0.0.1:9000"),
+        decrypted_db_path=Path(config.WEIXIN.get("decrypted_db_path", "")),
+        decrypt_repo=Path(config.WEIXIN["sidecar_repo"]) if config.WEIXIN.get("sidecar_repo") else None,
+        self_wxid=config.WEIXIN.get("self_wxid") or "filehelper",
+    )
+    wcf.setup()
 
     def handler(sig, frame):
-        wcf.cleanup()  # 退出前清理环境
         exit(0)
 
     signal.signal(signal.SIGINT, handler)

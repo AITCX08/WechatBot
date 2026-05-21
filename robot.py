@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
-
+import pexpect
+import subprocess
 import logging
+import json
 import re
 import time
 import xml.etree.ElementTree as ET
 from queue import Empty
 from threading import Thread
 from base.func_zhipu import ZhiPu
-
-from wcferry import Wcf, WxMsg
+from Lexxue_api import ck, xd, cs
+from wx import WxAdapter as Wcf
+from wx import WxMsg
 
 from base.func_bard import BardAssistant
 from base.func_chatglm import ChatGLM
@@ -34,39 +37,50 @@ class Robot(Job):
         self.LOG = logging.getLogger("Robot")
         self.wxid = self.wcf.get_self_wxid()
         self.allContacts = self.getAllContacts()
+        self.chitchat_data = self.load_json_data()
+        self.chitchat_images = self.load_json_images()
+        self.chitchat_menu = self.load_json_menu()
 
-        if ChatType.is_in_chat_types(chat_type):
-            if chat_type == ChatType.TIGER_BOT.value and TigerBot.value_check(self.config.TIGERBOT):
-                self.chat = TigerBot(self.config.TIGERBOT)
-            elif chat_type == ChatType.CHATGPT.value and ChatGPT.value_check(self.config.CHATGPT):
-                self.chat = ChatGPT(self.config.CHATGPT)
-            elif chat_type == ChatType.XINGHUO_WEB.value and XinghuoWeb.value_check(self.config.XINGHUO_WEB):
-                self.chat = XinghuoWeb(self.config.XINGHUO_WEB)
-            elif chat_type == ChatType.CHATGLM.value and ChatGLM.value_check(self.config.CHATGLM):
-                self.chat = ChatGLM(self.config.CHATGLM)
-            elif chat_type == ChatType.BardAssistant.value and BardAssistant.value_check(self.config.BardAssistant):
-                self.chat = BardAssistant(self.config.BardAssistant)
-            elif chat_type == ChatType.ZhiPu.value and ZhiPu.value_check(self.config.ZHIPU):
-                self.chat = ZhiPu(self.config.ZHIPU)
-            else:
-                self.LOG.warning("未配置模型")
-                self.chat = None
+        deepseek = True
+        if deepseek:
+            print("使用deepseek模型")
+            self.chat = DeepSeek(self.config.DEEPSEEK)
         else:
-            if TigerBot.value_check(self.config.TIGERBOT):
-                self.chat = TigerBot(self.config.TIGERBOT)
-            elif ChatGPT.value_check(self.config.CHATGPT):
-                self.chat = ChatGPT(self.config.CHATGPT)
-            elif XinghuoWeb.value_check(self.config.XINGHUO_WEB):
-                self.chat = XinghuoWeb(self.config.XINGHUO_WEB)
-            elif ChatGLM.value_check(self.config.CHATGLM):
-                self.chat = ChatGLM(self.config.CHATGLM)
-            elif BardAssistant.value_check(self.config.BardAssistant):
-                self.chat = BardAssistant(self.config.BardAssistant)
-            elif ZhiPu.value_check(self.config.ZhiPu):
-                self.chat = ZhiPu(self.config.ZhiPu)
+            if ChatType.is_in_chat_types(chat_type):
+                if chat_type == ChatType.DEEPSEEK.value and self.value_check(self.config.DEEPSEEK):
+                    self.chat = DeepSeek(self.config.DEEPSEEK)
+                elif chat_type == ChatType.TIGER_BOT.value and TigerBot.value_check(self.config.TIGERBOT):
+                    self.chat = TigerBot(self.config.TIGERBOT)
+                elif chat_type == ChatType.CHATGPT.value and ChatGPT.value_check(self.config.CHATGPT):
+                    self.chat = ChatGPT(self.config.CHATGPT)
+                elif chat_type == ChatType.XINGHUO_WEB.value and XinghuoWeb.value_check(self.config.XINGHUO_WEB):
+                    self.chat = XinghuoWeb(self.config.XINGHUO_WEB)
+                elif chat_type == ChatType.CHATGLM.value and ChatGLM.value_check(self.config.CHATGLM):
+                    self.chat = ChatGLM(self.config.CHATGLM)
+                elif chat_type == ChatType.BardAssistant.value and BardAssistant.value_check(self.config.BardAssistant):
+                    self.chat = BardAssistant(self.config.BardAssistant)
+                elif chat_type == ChatType.ZhiPu.value and ZhiPu.value_check(self.config.ZHIPU):
+                    self.chat = ZhiPu(self.config.ZHIPU)
+                else:
+                    self.LOG.warning("未配置模型")
+                    self.chat = None
             else:
-                self.LOG.warning("未配置模型")
-                self.chat = None
+                print("未使用模型")
+                if TigerBot.value_check(self.config.TIGERBOT):
+                    self.chat = TigerBot(self.config.TIGERBOT)
+                elif ChatGPT.value_check(self.config.CHATGPT):
+                    self.chat = ChatGPT(self.config.CHATGPT)
+                elif XinghuoWeb.value_check(self.config.XINGHUO_WEB):
+                    self.chat = XinghuoWeb(self.config.XINGHUO_WEB)
+                elif ChatGLM.value_check(self.config.CHATGLM):
+                    self.chat = ChatGLM(self.config.CHATGLM)
+                elif BardAssistant.value_check(self.config.BardAssistant):
+                    self.chat = BardAssistant(self.config.BardAssistant)
+                elif ZhiPu.value_check(self.config.ZhiPu):
+                    self.chat = ZhiPu(self.config.ZhiPu)
+                else:
+                    self.LOG.warning("未配置模型")
+                    self.chat = None
 
         self.LOG.info(f"已选择: {self.chat}")
 
@@ -110,25 +124,115 @@ class Robot(Job):
 
         return status
 
+    def load_json_data(self):
+        try:
+            with open('关键词回复.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading chitchat data: {e}")
+            return {}
+
+    def load_json_images(self):
+        try:
+            with open('关键词发图.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading chitchat images: {e}")
+            return {}
+
+    def load_json_menu(self):
+        try:
+            with open('菜单格式.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading chitchat menu: {e}")
+            return {}
+
+    def get_response(self, msg: str):
+        msg_str = str(msg)
+
+        for keyword, response in self.chitchat_data.items():
+            if keyword in msg_str:
+                return response
+        # return "机器人未能找到匹配的回复，请您等待客服的回复吧~"
+
+    def get_response_from_data(self, msg_str):
+        responses = []
+        for keyword, response in self.chitchat_data.items():
+            if keyword in msg_str:
+                responses.append(response)
+        return responses
+
+    def get_image_from_images(self, msg_str):
+        image_paths = []
+        for keyword, image_path in self.chitchat_images.items():
+            if keyword in msg_str:
+                image_paths.append(image_path)
+        return image_paths
+
+    def get_menu_from_menu(self, msg_str):
+        menus = []
+        for keyword, menu_format in self.chitchat_menu.items():
+            if keyword in msg_str:
+                menus.append(menu_format)
+        return menus
+
+    def chat_bot(self, msg: str):
+        msg_str = str(msg)
+
+        if msg_str == "#获取课程列表":
+            return None
+        else:
+            return self.get_response(msg_str)
+
     def toChitchat(self, msg: WxMsg) -> bool:
         """闲聊，接入 ChatGPT
         """
+        msg_str = str(msg.content)
+        sent_message = False
+
         if not self.chat:  # 没接 ChatGPT，固定回复
-            rsp = "你@我干嘛？"
+            responses = self.get_response_from_data(msg_str)
+            for response in responses:
+                if msg.from_group():
+                    self.sendTextMsg(response, msg.roomid, msg.sender)
+                else:
+                    self.sendTextMsg(response, msg.sender)
+                sent_message = True
+
+            image_paths = self.get_image_from_images(msg_str)
+            for image_path in image_paths:
+                if msg.from_group():
+                    self.sendImageMsg(image_path, msg.roomid)
+                else:
+                    self.sendImageMsg(image_path, msg.sender)
+                sent_message = True
+
+            menus = self.get_menu_from_menu(msg_str)
+            for menu_format in menus:
+                if msg.from_group():
+                    self.sendTextMsg(menu_format, msg.roomid, msg.sender)
+                else:
+                    self.sendTextMsg(menu_format, msg.sender)
+                sent_message = True
+
+            if not sent_message:
+                return False
         else:  # 接了 ChatGPT，智能回复
             q = re.sub(r"@.*?[\u2005|\s]", "", msg.content).replace(" ", "")
-            rsp = self.chat.get_answer(q, (msg.roomid if msg.from_group() else msg.sender))
+            response = self.chat.get_answer(q, (msg.roomid if msg.from_group() else msg.sender))
 
-        if rsp:
-            if msg.from_group():
-                self.sendTextMsg(rsp, msg.roomid, msg.sender)
+            if response:
+                if msg.from_group():
+                    self.sendTextMsg(response, msg.roomid, msg.sender)
+                else:
+                    self.sendTextMsg(response, msg.sender)
+                return True
             else:
-                self.sendTextMsg(rsp, msg.sender)
+                self.LOG.error(f"无法从 ChatGPT 获得答案")
+                return False
 
-            return True
-        else:
-            self.LOG.error(f"无法从 ChatGPT 获得答案")
-            return False
+        return True
 
     def processMsg(self, msg: WxMsg) -> None:
         """当接收到消息的时候，会调用本方法。如果不实现本方法，则打印原始消息。
@@ -221,6 +325,20 @@ class Robot(Job):
             self.LOG.info(f"To {receiver}: {ats}\r{msg}")
             self.wcf.send_text(f"{ats}\n\n{msg}", receiver, at_list)
 
+    def sendImageMsg(self, image_path: str, receiver: str) -> None:
+        """ 发送图片
+        :param image_path: 图片路径或URL
+        :param receiver: 接收人wxid或者群id
+        """
+        try:
+            status = self.wcf.send_image(image_path, receiver)
+            if status == 0:
+                self.LOG.info(f"Sent image to {receiver}: {image_path}")
+            else:
+                self.LOG.error(f"Failed to send image to {receiver}: {image_path}, status code: {status}")
+        except Exception as e:
+            self.LOG.error(f"Failed to send image to {receiver}: {e}")
+
     def getAllContacts(self) -> dict:
         """
         获取联系人（包括好友、公众号、服务号、群成员……）
@@ -253,7 +371,7 @@ class Robot(Job):
         if nickName:
             # 添加了好友，更新好友列表
             self.allContacts[msg.sender] = nickName[0]
-            self.sendTextMsg(f"Hi {nickName[0]}，我自动通过了你的好友请求。", msg.sender)
+            self.sendTextMsg(f"你好鸭同学 需要什么业务呢", msg.sender)
 
     def newsReport(self) -> None:
         receivers = self.config.NEWS
@@ -263,3 +381,34 @@ class Robot(Job):
         news = News().get_important_news()
         for r in receivers:
             self.sendTextMsg(news, r)
+
+
+# 添加DeepSeek类定义（假设）
+class DeepSeek:
+    def __init__(self, config):
+        self.config = None
+
+    @classmethod
+    def get_answer(cls, question, context=None):
+        print('使用deepseek生成中.....')
+
+        # 构建命令
+        command = ['ollama', 'run', 'deepseek-r1:7b']
+
+        # 启动子进程，并指定编码为UTF-8
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+
+        # 发送问题到模型
+        stdout, stderr = process.communicate(input=question)
+
+        if process.returncode != 0:
+            print(f"Error running model: {stderr}")
+            return None
+
+        # 去除 <think></think> 标签
+        cleaned_output = stdout.replace('<think>\n\n</think>\n', '').strip()
+
+        return cleaned_output
+
+
+# print(DeepSeek.get_answer(question='你好'))

@@ -31,9 +31,33 @@ class Config(object):
         self.NEWS = yconfig["news"]["receivers"]
         self.REPORT_REMINDERS = yconfig["report_reminder"]["receivers"]
 
-        self.CHATGPT = yconfig.get("chatgpt", {})
-        self.TIGERBOT = yconfig.get("tigerbot", {})
-        self.XINGHUO_WEB = yconfig.get("xinghuo_web", {})
-        self.CHATGLM = yconfig.get("chatglm", {})
-        self.BardAssistant = yconfig.get("bard", {})
-        self.ZhiPu = yconfig.get("zhipu", {})
+        ai = True
+        if ai == True:
+            self.DEEPSEEK = yconfig.get("deepseek", {})
+            self.CHATGPT = yconfig.get("chatgpt", {})
+            self.TIGERBOT = yconfig.get("tigerbot", {})
+            self.XINGHUO_WEB = yconfig.get("xinghuo_web", {})
+            self.CHATGLM = yconfig.get("chatglm", {})
+            self.BardAssistant = yconfig.get("bard", {})
+            self.ZhiPu = yconfig.get("zhipu", {})
+        else:
+            self.DEEPSEEK = None
+            self.CHATGPT = None
+            self.TIGERBOT = None
+            self.XINGHUO_WEB = None
+            self.CHATGLM = None
+            self.BardAssistant = None
+            self.ZhiPu = None
+
+        self.WEIXIN = yconfig.get("weixin", {})
+        self.LEXUE = yconfig.get("lexue", {})
+        order_safety_defaults = {
+            "dry_run": True,
+            "confirm_timeout_sec": 300,
+            "max_extract_rounds": 3,
+            "daily_limit": 50,
+            "per_user_cooldown_sec": 60,
+        }
+        order_safety_defaults.update(yconfig.get("order_safety", {}))
+        self.ORDER_SAFETY = order_safety_defaults
+        self.LLM = yconfig.get("llm", {})

@@ -82,3 +82,28 @@ bard: # -----bard配置这行不填-----
 zhipu:  # -----zhipu配置这行不填-----
   api_key:  #api key
   model:   # 模型类型
+
+weixin:
+  exe: "C:/Program Files/Tencent/Weixin/Weixin.exe"
+  sidecar_repo: "./wx/sidecar/wechat-decrypt"
+  sidecar_url: "http://127.0.0.1:5678"
+  decrypted_db_path: "./wx/decrypted/contact.db"
+  self_wxid: ""   # auto-detected at runtime if blank
+
+lexue:
+  user: "1492246"
+  pass: "IZ0IPKM5pYPhhGqy"
+  url: "http://lxuexi.cn/"
+
+order_safety:
+  dry_run: true
+  confirm_timeout_sec: 300
+  max_extract_rounds: 3
+  daily_limit: 50
+  per_user_cooldown_sec: 60
+
+llm:
+  intent_model: deepseek
+  chitchat_model: deepseek
+  intent_prompt_path: prompts/order_intent.md
+  extract_prompt_path: prompts/order_extract.md

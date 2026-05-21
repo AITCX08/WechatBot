@@ -1,0 +1,88 @@
+from __future__ import annotations
+import logging
+from pathlib import Path
+
+from wx.msg import WxMsg
+from router.template import TemplateMatcher, TemplateAction
+
+LOG = logging.getLogger(__name__)
+
+
+class Dispatcher:
+    """Routes each incoming WxMsg through a deterministic chain."""
+
+    def __init__(
+        self,
+        wx,
+        template_matcher: TemplateMatcher,
+        order_handler,
+        llm,
+        groups_allowed: set[str],
+    ):
+        self.wx = wx
+        self.tm = template_matcher
+        self.order = order_handler
+        self.llm = llm
+        self.groups = set(groups_allowed)
+        self._self_wxid = wx.get_self_wxid()
+
+    def handle(self, msg: WxMsg) -> None:
+        try:
+            self._handle(msg)
+        except Exception as e:
+            LOG.error("dispatcher error on msg %s: %s", msg.id, e, exc_info=True)
+
+    def _handle(self, msg: WxMsg) -> None:
+        # 1. Self messages: ignore
+        if msg.from_self():
+            return
+
+        # 2. Friend request (type 37): auto-accept
+        if msg.type == 37:
+            LOG.info("auto-accepting friend request from %s", msg.sender)
+            self.wx.accept_new_friend("", "", 0)
+            return
+
+        # 3. Group filter: only respond in allowed groups, and only when @bot
+        if msg.from_group():
+            if msg.roomid not in self.groups:
+                return
+            if not msg.is_at(self._self_wxid):
+                return
+            # @bot in allowed group → continue processing
+
+        receiver = msg.roomid if msg.from_group() else msg.sender
+
+        # 4. Order pending: any reply from a sender with an open draft goes
+        #    to the order handler (covers confirm/cancel/correction)
+        if self.order.is_pending_for(msg.sender):
+            self.order.on_user_reply(msg)
+            return
+
+        # 5. Template matches (static keyword/image/menu replies)
+        actions = self.tm.match(msg.content) if msg.type == 1 else []
+        if actions:
+            for act in actions:
+                self._dispatch_action(act, receiver)
+            return
+
+        # 6. Order intent classifier
+        if msg.type == 1 and self.order.looks_like_order_intent(msg.content):
+            self.order.handle_new_order_message(msg)
+            return
+
+        # 7. Fallback: LLM chitchat (only on text messages)
+        if msg.type == 1:
+            response = self.llm.get_answer(msg.content, receiver)
+            if response:
+                self.wx.send_text(response, receiver)
+
+    def _dispatch_action(self, action: TemplateAction, receiver: str) -> None:
+        if action.kind == "text":
+            self.wx.send_text(action.payload, receiver)
+        elif action.kind == "menu":
+            self.wx.send_text(action.payload, receiver)
+        elif action.kind == "image":
+            self.wx.send_image(action.payload, receiver)
+        else:
+            LOG.warning("unknown action kind: %s", action.kind)

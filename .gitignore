@@ -1,12 +1,21 @@
 .*
 !.gitignore
 !.github/
+!.gitkeep
 
 *pyc
 __pycache__
 
 logs/
+!logs/audit/.gitkeep
 *.log
 *.log.*
 
 config.yaml
+
+# Audit logs and decrypted data are runtime artifacts, never commit
+logs/audit/orders.jsonl
+logs/audit/*.jsonl
+wx/sidecar/wechat-decrypt/.venv/
+wx/decrypted/
+wx/sidecar/wechat-decrypt/output/

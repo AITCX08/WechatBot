@@ -1,0 +1,3 @@
+[submodule "wx/sidecar/wechat-decrypt"]
+	path = wx/sidecar/wechat-decrypt
+	url = https://github.com/ylytdeng/wechat-decrypt.git

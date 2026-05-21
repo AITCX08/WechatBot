@@ -6,12 +6,15 @@ import json
 import re
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from queue import Empty
 from threading import Thread
 from base.func_zhipu import ZhiPu
 from Lexxue_api import ck, xd, cs
 from wx import WxAdapter as Wcf
 from wx import WxMsg
+from router.dispatch import Dispatcher
+from router.template import TemplateMatcher
 
 from base.func_bard import BardAssistant
 from base.func_chatglm import ChatGLM
@@ -25,6 +28,22 @@ from constants import ChatType
 from job_mgmt import Job
 
 __version__ = "39.0.10.1"
+
+
+class NullOrderHandler:
+    """Placeholder until OrderHandler is added in Phase 4."""
+
+    def is_pending_for(self, wxid: str) -> bool:
+        return False
+
+    def looks_like_order_intent(self, text: str) -> bool:
+        return False
+
+    def on_user_reply(self, msg) -> None:
+        pass
+
+    def handle_new_order_message(self, msg) -> None:
+        pass
 
 
 class Robot(Job):
@@ -83,6 +102,19 @@ class Robot(Job):
                     self.chat = None
 
         self.LOG.info(f"已选择: {self.chat}")
+
+        self.template_matcher = TemplateMatcher(
+            replies_path=Path("关键词回复.json"),
+            images_path=Path("关键词发图.json"),
+            menus_path=Path("菜单格式.json"),
+        )
+        self.dispatcher = Dispatcher(
+            wx=self.wcf,
+            template_matcher=self.template_matcher,
+            order_handler=NullOrderHandler(),   # replaced in Phase 4
+            llm=self.chat,
+            groups_allowed=set(self.config.GROUPS or []),
+        )
 
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -242,36 +274,7 @@ class Robot(Job):
         receivers = msg.roomid
         self.sendTextMsg(content, receivers, msg.sender)
         """
-
-        # 群聊消息
-        if msg.from_group():
-            # 如果在群里被 @
-            if msg.roomid not in self.config.GROUPS:  # 不在配置的响应的群列表里，忽略
-                return
-
-            if msg.is_at(self.wxid):  # 被@
-                self.toAt(msg)
-
-            else:  # 其他消息
-                self.toChengyu(msg)
-
-            return  # 处理完群聊信息，后面就不需要处理了
-
-        # 非群聊信息，按消息类型进行处理
-        if msg.type == 37:  # 好友请求
-            self.autoAcceptFriendRequest(msg)
-
-        elif msg.type == 10000:  # 系统信息
-            self.sayHiToNewFriend(msg)
-
-        elif msg.type == 0x01:  # 文本消息
-            # 让配置加载更灵活，自己可以更新配置。也可以利用定时任务更新。
-            if msg.from_self():
-                if msg.content == "^更新$":
-                    self.config.reload()
-                    self.LOG.info("已更新")
-            else:
-                self.toChitchat(msg)  # 闲聊
+        self.dispatcher.handle(msg)
 
     def onMsg(self, msg: WxMsg) -> int:
         try:

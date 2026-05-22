@@ -138,20 +138,69 @@ def create_app(state: Optional[BotState] = None) -> FastAPI:
 
     # ---- pending orders ----
     @app.get("/api/orders/pending")
-    def api_pending_orders():
-        oh = state.order_handler
-        if oh is None:
-            return {"items": []}
+    def api_pending_orders(account: Optional[str] = None):
         items = []
+        handlers = []
+        if account:
+            acc = state.accounts.get(account)
+            if acc and acc.order_handler is not None:
+                handlers.append((account, acc.order_handler))
+        else:
+            for acc in state.accounts.all():
+                if acc.order_handler is not None:
+                    handlers.append((acc.name, acc.order_handler))
+            if state.order_handler is not None and not handlers:
+                handlers.append(("default", state.order_handler))
+        for acc_name, oh in handlers:
+            try:
+                for wxid, draft in oh._pending.items():  # type: ignore[attr-defined]
+                    items.append({
+                        "account": acc_name,
+                        "wxid": wxid,
+                        **draft.to_dict(),
+                    })
+            except Exception:
+                pass
+        return {"items": items}
+
+    # ---- accounts ----
+    @app.get("/api/accounts")
+    def api_accounts():
+        return {"items": state.accounts.snapshot_all()}
+
+    @app.post("/api/accounts/{name}/start")
+    def api_account_start(name: str):
+        ok, msg = state.accounts.start(name)
+        if not ok:
+            raise HTTPException(400, msg)
+        return {"ok": True, "msg": msg}
+
+    @app.post("/api/accounts/{name}/stop")
+    def api_account_stop(name: str):
+        ok, msg = state.accounts.stop(name)
+        if not ok:
+            raise HTTPException(400, msg)
+        return {"ok": True, "msg": msg}
+
+    @app.post("/api/accounts/{name}/pause")
+    async def api_account_pause(name: str, req: Request):
+        reason = ""
         try:
-            for wxid, draft in oh._pending.items():  # type: ignore[attr-defined]
-                items.append({
-                    "wxid": wxid,
-                    **draft.to_dict(),
-                })
+            body = await req.json()
+            reason = (body or {}).get("reason", "")
         except Exception:
             pass
-        return {"items": items}
+        ok, msg = state.accounts.pause(name, reason)
+        if not ok:
+            raise HTTPException(400, msg)
+        return {"ok": True, "msg": msg}
+
+    @app.post("/api/accounts/{name}/resume")
+    def api_account_resume(name: str):
+        ok, msg = state.accounts.resume(name)
+        if not ok:
+            raise HTTPException(400, msg)
+        return {"ok": True, "msg": msg}
 
     # ---- SSE stream ----
     @app.get("/api/events")

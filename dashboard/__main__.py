@@ -15,6 +15,7 @@ import logging
 import time
 
 from dashboard import log_handler as dash_log
+from dashboard.accounts import AccountConfig
 from dashboard.server import run_in_thread
 from dashboard.state import get_state
 
@@ -39,11 +40,19 @@ def main() -> None:
     LOG.info("Bot 未连接；UI 上 Sidecar / Weixin / 队列状态会显示离线。")
     LOG.info("Ctrl+C 退出。")
 
+    # Demo accounts so the empty UI shows the multi-account layout.
+    state.accounts.register(AccountConfig(name="demo-main", label="演示·主账号",
+                                          exe=r"C:\Program Files\Tencent\Weixin\Weixin.exe"))
+    state.accounts.register(AccountConfig(name="demo-support", label="演示·客服号",
+                                          exe=r"C:\Program Files\Tencent\Weixin\Weixin.exe"))
+
     # Demo: seed some logs so the empty UI looks alive on first visit.
     state.logs.append({"ts": time.time(), "level": "INFO", "logger": "demo",
-                       "message": "Dashboard 已启动，等待 bot 接入..."})
+                       "message": "Dashboard 已启动 (standalone 模式，不会真的启动 Weixin)"})
     state.logs.append({"ts": time.time(), "level": "INFO", "logger": "demo",
                        "message": "若要看到真实数据，运行 python main.py -c 7"})
+    state.logs.append({"ts": time.time(), "level": "WARNING", "logger": "demo",
+                       "message": "Standalone 模式没注册 factory，账号 Start 按钮会报 400"})
 
     try:
         while True:

@@ -50,6 +50,21 @@ class Config(object):
             self.ZhiPu = None
 
         self.WEIXIN = yconfig.get("weixin", {})
+        # weixin.instances is the new multi-account config. If absent, we
+        # synthesize a single "default" account from the legacy weixin.* fields
+        # so existing config files keep working.
+        instances = self.WEIXIN.get("instances")
+        if not instances:
+            instances = [{
+                "name": "default",
+                "label": "默认账号",
+                "exe": self.WEIXIN.get("exe", ""),
+                "sidecar_url": self.WEIXIN.get("sidecar_url", "http://127.0.0.1:5678"),
+                "sidecar_repo": self.WEIXIN.get("sidecar_repo", ""),
+                "decrypted_db_path": self.WEIXIN.get("decrypted_db_path", ""),
+                "self_wxid": self.WEIXIN.get("self_wxid", ""),
+            }]
+        self.WEIXIN_INSTANCES = instances
         self.LEXUE = yconfig.get("lexue", {})
         order_safety_defaults = {
             "dry_run": True,

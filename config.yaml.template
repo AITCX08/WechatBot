@@ -89,6 +89,25 @@ weixin:
   sidecar_url: "http://127.0.0.1:5678"
   decrypted_db_path: "./wx/decrypted/contact.db"
   self_wxid: ""   # auto-detected at runtime if blank
+  dashboard_port: 9090
+
+  # 多账号支持。如果填了 instances 列表，会覆盖上面的单账号设置；
+  # 每个 instance 都是一个独立运行的微信，互不干扰。
+  # 留空时（不写 instances 节）会使用上面的字段当成单账号 "default"。
+  # instances:
+  #   - name: main           # 唯一英文标识
+  #     label: 主账号        # UI 显示名
+  #     exe: "C:/Program Files/Tencent/Weixin/Weixin.exe"
+  #     sidecar_url: "http://127.0.0.1:5678"
+  #     sidecar_repo: "./wx/sidecar/wechat-decrypt"
+  #     decrypted_db_path: "./wx/decrypted/main/contact.db"
+  #     self_wxid: ""
+  #   - name: support
+  #     label: 客服号
+  #     exe: "C:/Program Files/Tencent/Weixin2/Weixin.exe"  # 复制一份微信
+  #     sidecar_url: "http://127.0.0.1:5679"                # 每实例独占端口
+  #     sidecar_repo: "./wx/sidecar/wechat-decrypt"
+  #     decrypted_db_path: "./wx/decrypted/support/contact.db"
 
 lexue:
   user: "1492246"

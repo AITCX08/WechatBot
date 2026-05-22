@@ -167,3 +167,94 @@ def test_pending_orders_with_handler(client):
     assert len(items) == 1
     assert items[0]["wxid"] == "wxid_a"
     assert items[0]["school"] == "X"
+
+
+# ----- account endpoints -----
+
+def _register_account(s, name="acc1", label="Account 1"):
+    from dashboard.accounts import AccountConfig
+    return s.accounts.register(AccountConfig(name=name, label=label))
+
+
+def test_accounts_endpoint_empty(client):
+    r = client.get("/api/accounts")
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
+def test_accounts_endpoint_lists_registered(client):
+    s = get_state()
+    _register_account(s, "alice", "Alice's bot")
+    _register_account(s, "bob", "Bob's bot")
+
+    r = client.get("/api/accounts")
+    items = r.json()["items"]
+    names = [i["name"] for i in items]
+    assert "alice" in names
+    assert "bob" in names
+    for item in items:
+        assert item["status"] == "stopped"
+        assert item["paused"] is False
+
+
+def test_account_start_without_factory_fails(client):
+    s = get_state()
+    _register_account(s, "x")
+    r = client.post("/api/accounts/x/start")
+    assert r.status_code == 400
+    assert "factory" in r.json()["detail"]
+
+
+def test_account_start_with_factory(client):
+    s = get_state()
+    state_ref = _register_account(s, "x")
+
+    def fac(cfg, st):
+        return (MagicMock(), MagicMock(), MagicMock())
+
+    s.accounts.set_factory(fac)
+    r = client.post("/api/accounts/x/start")
+    assert r.status_code == 200
+    # background thread; wait a beat
+    import time as _t
+    _t.sleep(0.2)
+    assert state_ref.status.value in ("running", "starting")
+
+
+def test_account_pause_resume(client):
+    s = get_state()
+    _register_account(s, "y")
+    r = client.post("/api/accounts/y/pause", json={"reason": "test"})
+    assert r.status_code == 200
+    r = client.get("/api/accounts")
+    item = [i for i in r.json()["items"] if i["name"] == "y"][0]
+    assert item["paused"] is True
+    assert item["pause_reason"] == "test"
+
+    r = client.post("/api/accounts/y/resume")
+    assert r.status_code == 200
+    r = client.get("/api/accounts")
+    item = [i for i in r.json()["items"] if i["name"] == "y"][0]
+    assert item["paused"] is False
+
+
+def test_account_stop_when_not_running(client):
+    s = get_state()
+    _register_account(s, "z")
+    r = client.post("/api/accounts/z/stop")
+    assert r.status_code == 200
+
+
+def test_account_unknown_returns_400(client):
+    r = client.post("/api/accounts/nobody/start")
+    assert r.status_code == 400
+
+
+def test_status_includes_account_aggregate(client):
+    s = get_state()
+    _register_account(s, "a")
+    _register_account(s, "b")
+    r = client.get("/api/status")
+    data = r.json()
+    assert data["account_count"] == 2
+    assert len(data["accounts"]) == 2

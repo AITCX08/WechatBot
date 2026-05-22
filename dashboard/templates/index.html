@@ -18,6 +18,23 @@
   .dot { width:6px; height:6px; border-radius:9999px; display:inline-block; }
   .tab-active { border-color:#1f2937; color:#1f2937; }
   .tab-inactive { border-color:transparent; color:#6b7280; }
+  .status-stopped { background:#f4f4f5; color:#71717a; border:1px solid #e4e4e7; }
+  .status-starting { background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+  .status-running  { background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; }
+  .status-stopping { background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+  .status-error    { background:#fee2e2; color:#991b1b; border:1px solid #fecaca; }
+  .btn { padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; transition:all .15s; }
+  .btn-primary { background:#1f2937; color:white; }
+  .btn-primary:hover { background:#0f172a; }
+  .btn-success { background:#059669; color:white; }
+  .btn-success:hover { background:#047857; }
+  .btn-warning { background:#d97706; color:white; }
+  .btn-warning:hover { background:#b45309; }
+  .btn-danger { background:#dc2626; color:white; }
+  .btn-danger:hover { background:#b91c1c; }
+  .btn-ghost { border:1px solid #d4d4d8; color:#3f3f46; background:white; }
+  .btn-ghost:hover { background:#f4f4f5; }
+  .btn:disabled { opacity:0.4; cursor:not-allowed; }
 </style>
 </head>
 <body class="bg-zinc-50 text-zinc-900">
@@ -30,24 +47,19 @@
         <div class="w-8 h-8 rounded-lg bg-zinc-900 text-white grid place-items-center font-bold">W</div>
         <div>
           <div class="text-sm font-semibold">WeChatRobot Dashboard</div>
-          <div class="text-xs text-zinc-500">Weixin 4.x · sidecar + UIA · 自动下单</div>
+          <div class="text-xs text-zinc-500">Weixin 4.x · sidecar + UIA · 多账号</div>
         </div>
       </div>
-
       <div class="flex items-center gap-2">
         <template x-if="status.paused">
-          <button @click="resume()" class="px-3 py-1.5 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700">
-            ▶ 恢复
-          </button>
+          <button @click="globalResume()" class="btn btn-success">▶ 全局恢复</button>
         </template>
         <template x-if="!status.paused">
-          <button @click="pause()" class="px-3 py-1.5 rounded bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600">
-            ⏸ 暂停
-          </button>
+          <button @click="globalPause()" class="btn btn-warning">⏸ 全局暂停</button>
         </template>
         <span class="pill" :class="status.paused ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
           <span class="dot" :class="status.paused ? 'bg-amber-500' : 'bg-emerald-500'"></span>
-          <span x-text="status.paused ? '已暂停' : '运行中'"></span>
+          <span x-text="status.paused ? '全局已暂停' : '正常'"></span>
         </span>
       </div>
     </div>
@@ -55,28 +67,18 @@
 
   <main class="max-w-7xl mx-auto px-6 py-6">
 
-    <!-- Status cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+    <!-- Overall metrics -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
       <div class="bg-white rounded-lg border border-zinc-200 p-3">
         <div class="text-xs text-zinc-500">运行时长</div>
         <div class="text-lg font-semibold mt-1" x-text="formatUptime(status.uptime_sec || 0)"></div>
       </div>
       <div class="bg-white rounded-lg border border-zinc-200 p-3">
-        <div class="text-xs text-zinc-500">Sidecar</div>
-        <div class="text-lg font-semibold mt-1 flex items-center gap-2">
-          <span class="dot" :class="status.sidecar_alive ? 'bg-emerald-500' : 'bg-zinc-400'"></span>
-          <span x-text="status.sidecar_alive ? '存活' : '离线'"></span>
-        </div>
+        <div class="text-xs text-zinc-500">在线账号</div>
+        <div class="text-lg font-semibold mt-1" x-text="onlineCount() + '/' + (status.accounts?.length || 0)"></div>
       </div>
       <div class="bg-white rounded-lg border border-zinc-200 p-3">
-        <div class="text-xs text-zinc-500">Weixin 窗口</div>
-        <div class="text-lg font-semibold mt-1 flex items-center gap-2">
-          <span class="dot" :class="status.weixin_attached ? 'bg-emerald-500' : 'bg-zinc-400'"></span>
-          <span x-text="status.weixin_attached ? '已附加' : '未附加'"></span>
-        </div>
-      </div>
-      <div class="bg-white rounded-lg border border-zinc-200 p-3">
-        <div class="text-xs text-zinc-500">消息队列</div>
+        <div class="text-xs text-zinc-500">消息队列(汇总)</div>
         <div class="text-lg font-semibold mt-1" x-text="status.queue_depth || 0"></div>
       </div>
       <div class="bg-white rounded-lg border border-zinc-200 p-3">
@@ -84,14 +86,78 @@
         <div class="text-lg font-semibold mt-1" x-text="status.pending_orders || 0"></div>
       </div>
       <div class="bg-white rounded-lg border border-zinc-200 p-3">
-        <div class="text-xs text-zinc-500">今日订单</div>
+        <div class="text-xs text-zinc-500">今日订单(汇总)</div>
         <div class="text-lg font-semibold mt-1" x-text="status.daily_orders || 0"></div>
+      </div>
+    </div>
+
+    <!-- Accounts grid -->
+    <div class="bg-white rounded-lg border border-zinc-200 mb-6">
+      <div class="px-4 py-3 border-b border-zinc-200 flex items-center justify-between">
+        <h2 class="text-sm font-semibold">账号列表</h2>
+        <span class="text-xs text-zinc-500" x-text="'共 ' + (status.accounts?.length || 0) + ' 个'"></span>
+      </div>
+      <div class="p-4">
+        <template x-if="!status.accounts?.length">
+          <div class="text-sm text-zinc-500 italic">
+            尚未配置账号。请在 <span class="mono">config.yaml</span> 的
+            <span class="mono">weixin.instances</span> 中添加，或检查 main.py 是否注册了账号。
+          </div>
+        </template>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <template x-for="acc in (status.accounts || [])" :key="acc.name">
+            <div class="border border-zinc-200 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-2">
+                <div>
+                  <div class="text-sm font-semibold" x-text="acc.label"></div>
+                  <div class="text-xs text-zinc-500 mono" x-text="acc.name"></div>
+                </div>
+                <span class="pill" :class="'status-' + acc.status" x-text="statusLabel(acc.status)"></span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 text-xs text-zinc-600 mb-3">
+                <div class="flex items-center gap-1.5">
+                  <span class="dot" :class="acc.weixin_attached ? 'bg-emerald-500' : 'bg-zinc-300'"></span>
+                  <span>Weixin <span x-text="acc.weixin_attached ? '已附加' : '未附加'"></span></span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <span class="dot" :class="acc.sidecar_alive ? 'bg-emerald-500' : 'bg-zinc-300'"></span>
+                  <span>Sidecar <span x-text="acc.sidecar_alive ? '存活' : '离线'"></span></span>
+                </div>
+                <div>队列: <span class="font-semibold" x-text="acc.queue_depth || 0"></span></div>
+                <div>待确认: <span class="font-semibold" x-text="acc.pending_orders || 0"></span></div>
+                <div>今日: <span class="font-semibold" x-text="acc.daily_orders || 0"></span></div>
+                <div>运行: <span x-text="formatUptime(acc.uptime_sec || 0)"></span></div>
+              </div>
+
+              <template x-if="acc.last_error">
+                <div class="text-xs text-red-600 mb-2 break-all" x-text="'❗ ' + acc.last_error"></div>
+              </template>
+
+              <div class="flex flex-wrap gap-1.5">
+                <template x-if="acc.status === 'stopped' || acc.status === 'error'">
+                  <button @click="accStart(acc.name)" class="btn btn-success">▶ 启动</button>
+                </template>
+                <template x-if="acc.status === 'running' && !acc.paused">
+                  <button @click="accPause(acc.name)" class="btn btn-warning">⏸ 暂停</button>
+                </template>
+                <template x-if="acc.status === 'running' && acc.paused">
+                  <button @click="accResume(acc.name)" class="btn btn-success">▶ 恢复</button>
+                </template>
+                <template x-if="acc.status === 'running' || acc.status === 'starting'">
+                  <button @click="accStop(acc.name)" class="btn btn-danger">■ 停止</button>
+                </template>
+                <button @click="accountFilter = acc.name; tab = 'logs'" class="btn btn-ghost">📋 查看</button>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
     <!-- Tabs -->
     <div class="bg-white rounded-lg border border-zinc-200">
-      <div class="border-b border-zinc-200 flex">
+      <div class="border-b border-zinc-200 flex items-center">
         <template x-for="t in ['logs','messages','orders','contacts']" :key="t">
           <button @click="tab = t"
             class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px"
@@ -100,8 +166,15 @@
           </button>
         </template>
         <div class="flex-1"></div>
-        <div class="px-3 py-2 text-xs text-zinc-500 self-center">
-          实时更新 · <span x-text="lastUpdate"></span>
+        <div class="px-3 py-2 flex items-center gap-2">
+          <label class="text-xs text-zinc-500">账号过滤:</label>
+          <select x-model="accountFilter" class="border border-zinc-300 rounded px-2 py-1 text-xs">
+            <option value="">全部</option>
+            <template x-for="a in (status.accounts || [])" :key="a.name">
+              <option :value="a.name" x-text="a.label"></option>
+            </template>
+          </select>
+          <span class="text-xs text-zinc-500 ml-2" x-text="lastUpdate"></span>
         </div>
       </div>
 
@@ -125,7 +198,7 @@
           </button>
           <button @click="clearLogs()" class="px-3 py-1.5 rounded border border-zinc-300 text-xs">清空显示</button>
         </div>
-        <div x-ref="logBox" class="mono bg-zinc-50 border border-zinc-200 rounded h-[480px] overflow-auto p-3 leading-relaxed">
+        <div x-ref="logBox" class="mono bg-zinc-50 border border-zinc-200 rounded h-[420px] overflow-auto p-3 leading-relaxed">
           <template x-for="row in filteredLogs()" :key="row.seq">
             <div class="flex gap-3" :class="'log-' + row.level">
               <span class="text-zinc-400 shrink-0" x-text="formatTs(row.ts)"></span>
@@ -144,10 +217,11 @@
           <input x-model.debounce.300ms="msgQuery" type="text" placeholder="搜索发送者 / 内容..."
             class="flex-1 border border-zinc-300 rounded px-3 py-1.5 text-sm" />
         </div>
-        <div class="h-[480px] overflow-auto border border-zinc-200 rounded">
+        <div class="h-[420px] overflow-auto border border-zinc-200 rounded">
           <table class="w-full text-sm">
             <thead class="bg-zinc-50 text-xs text-zinc-500 uppercase sticky top-0">
               <tr>
+                <th class="text-left px-3 py-2 w-24">账号</th>
                 <th class="text-left px-3 py-2 w-32">时间</th>
                 <th class="text-left px-3 py-2 w-12">类型</th>
                 <th class="text-left px-3 py-2 w-40">发送者</th>
@@ -158,6 +232,7 @@
             <tbody>
               <template x-for="row in filteredMessages()" :key="row.seq">
                 <tr class="border-t border-zinc-100 hover:bg-zinc-50">
+                  <td class="px-3 py-2 text-xs text-zinc-500" x-text="row.account || '-'"></td>
                   <td class="px-3 py-2 text-xs text-zinc-500" x-text="formatTs(row.ts)"></td>
                   <td class="px-3 py-2 text-xs" x-text="row.type"></td>
                   <td class="px-3 py-2 mono text-xs" x-text="row.sender"></td>
@@ -166,7 +241,7 @@
                 </tr>
               </template>
               <tr x-show="filteredMessages().length === 0">
-                <td colspan="5" class="px-3 py-6 text-center text-zinc-400 italic">无消息</td>
+                <td colspan="6" class="px-3 py-6 text-center text-zinc-400 italic">无消息</td>
               </tr>
             </tbody>
           </table>
@@ -178,11 +253,11 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <h3 class="text-sm font-semibold mb-2 text-zinc-700">待确认订单</h3>
-            <div class="border border-zinc-200 rounded h-[420px] overflow-auto">
-              <template x-for="o in pendingOrders" :key="o.wxid">
+            <div class="border border-zinc-200 rounded h-[400px] overflow-auto">
+              <template x-for="o in pendingOrders" :key="o.account + '|' + o.wxid">
                 <div class="border-b border-zinc-100 p-3 text-sm">
                   <div class="flex items-center justify-between mb-1">
-                    <span class="mono text-xs text-zinc-500" x-text="o.wxid"></span>
+                    <span class="text-xs text-zinc-500"><span x-text="o.account"></span> · <span class="mono" x-text="o.wxid"></span></span>
                     <span class="text-xs text-amber-600" x-text="'第 ' + (o.extract_rounds || 0) + ' 轮'"></span>
                   </div>
                   <div class="text-zinc-700">
@@ -198,10 +273,10 @@
           </div>
           <div>
             <h3 class="text-sm font-semibold mb-2 text-zinc-700">最近事件</h3>
-            <div class="border border-zinc-200 rounded h-[420px] overflow-auto">
+            <div class="border border-zinc-200 rounded h-[400px] overflow-auto">
               <table class="w-full text-sm">
                 <tbody>
-                  <template x-for="a in auditItems.slice().reverse()" :key="a.seq">
+                  <template x-for="a in filteredAudit().slice().reverse()" :key="a.seq">
                     <tr class="border-b border-zinc-100">
                       <td class="px-3 py-2 text-xs text-zinc-500 w-28" x-text="formatTs(a.ts)"></td>
                       <td class="px-3 py-2">
@@ -210,7 +285,7 @@
                       <td class="px-3 py-2 mono text-xs text-zinc-500" x-text="a.wxid || (a.draft && a.draft.requester_wxid) || '-'"></td>
                     </tr>
                   </template>
-                  <tr x-show="!auditItems.length">
+                  <tr x-show="!filteredAudit().length">
                     <td colspan="3" class="px-3 py-6 text-center text-zinc-400 italic">无事件</td>
                   </tr>
                 </tbody>
@@ -228,7 +303,7 @@
           <button @click="loadContacts()" class="px-3 py-1.5 rounded border border-zinc-300 text-xs">刷新</button>
           <span class="self-center text-xs text-zinc-500" x-text="'共 ' + contactTotal + ' 条'"></span>
         </div>
-        <div class="h-[460px] overflow-auto border border-zinc-200 rounded">
+        <div class="h-[400px] overflow-auto border border-zinc-200 rounded">
           <table class="w-full text-sm">
             <thead class="bg-zinc-50 text-xs text-zinc-500 uppercase sticky top-0">
               <tr>
@@ -263,7 +338,7 @@
 function app() {
   return {
     tab: 'logs',
-    status: {},
+    status: { accounts: [] },
     logs: [],
     logLevel: '',
     logQuery: '',
@@ -275,6 +350,7 @@ function app() {
     contacts: [],
     contactQuery: '',
     contactTotal: 0,
+    accountFilter: '',
     lastUpdate: '',
     es: null,
 
@@ -283,12 +359,14 @@ function app() {
       this.openStream();
       this.timer = setInterval(() => this.refreshPending(), 5000);
       this.$watch('contactQuery', () => this.loadContacts());
+      this.$watch('accountFilter', () => this.loadContacts());
       this.loadContacts();
     },
     bootstrap() {
       fetch('/api/logs?n=200').then(r => r.json()).then(d => { this.logs = d.items; this.scrollLogs(); });
       fetch('/api/messages?n=100').then(r => r.json()).then(d => { this.messages = d.items; });
       fetch('/api/audit?n=100').then(r => r.json()).then(d => { this.auditItems = d.items; });
+      this.refreshPending();
     },
     openStream() {
       this.es = new EventSource('/api/events');
@@ -317,27 +395,44 @@ function app() {
         if (el) el.scrollTop = el.scrollHeight;
       });
     },
-    pause() {
-      fetch('/api/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'manual' }) })
-        .then(() => this.refreshStatus());
+
+    // ---- global controls ----
+    globalPause() {
+      fetch('/api/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'manual' }) });
     },
-    resume() {
-      fetch('/api/resume', { method: 'POST' }).then(() => this.refreshStatus());
+    globalResume() {
+      fetch('/api/resume', { method: 'POST' });
     },
-    refreshStatus() {
-      fetch('/api/status').then(r => r.json()).then(d => this.status = d);
-    },
+
+    // ---- per-account controls ----
+    accStart(name) { fetch(`/api/accounts/${name}/start`, { method: 'POST' }); },
+    accStop(name)  { fetch(`/api/accounts/${name}/stop`,  { method: 'POST' }); },
+    accPause(name) { fetch(`/api/accounts/${name}/pause`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'manual' }) }); },
+    accResume(name) { fetch(`/api/accounts/${name}/resume`, { method: 'POST' }); },
+
     refreshPending() {
-      fetch('/api/orders/pending').then(r => r.json()).then(d => this.pendingOrders = d.items || []);
+      const q = this.accountFilter ? `?account=${encodeURIComponent(this.accountFilter)}` : '';
+      fetch('/api/orders/pending' + q).then(r => r.json()).then(d => this.pendingOrders = d.items || []);
     },
     loadContacts() {
-      const q = this.contactQuery ? `?q=${encodeURIComponent(this.contactQuery)}` : '';
-      fetch('/api/contacts' + q).then(r => r.json()).then(d => {
+      const params = new URLSearchParams();
+      if (this.contactQuery) params.set('q', this.contactQuery);
+      if (this.accountFilter) params.set('account', this.accountFilter);
+      const qs = params.toString();
+      fetch('/api/contacts' + (qs ? '?' + qs : '')).then(r => r.json()).then(d => {
         this.contacts = d.items || [];
         this.contactTotal = d.total || 0;
       });
     },
+
     clearLogs() { this.logs = []; },
+    onlineCount() {
+      return (this.status.accounts || []).filter(a => a.status === 'running').length;
+    },
+    statusLabel(s) {
+      return { stopped: '已停止', starting: '启动中', running: '运行中', stopping: '停止中', error: '错误' }[s] || s;
+    },
+
     filteredLogs() {
       let out = this.logs;
       if (this.logLevel) out = out.filter(r => r.level === this.logLevel);
@@ -345,16 +440,28 @@ function app() {
         const q = this.logQuery.toLowerCase();
         out = out.filter(r => (r.message || '').toLowerCase().includes(q));
       }
+      if (this.accountFilter) {
+        out = out.filter(r => !r.account || r.account === this.accountFilter);
+      }
       return out;
     },
     filteredMessages() {
-      if (!this.msgQuery) return this.messages.slice().reverse();
-      const q = this.msgQuery.toLowerCase();
-      return this.messages.filter(r =>
-        (r.content || '').toLowerCase().includes(q) ||
-        (r.sender || '').toLowerCase().includes(q)
-      ).reverse();
+      let out = this.messages;
+      if (this.accountFilter) out = out.filter(r => !r.account || r.account === this.accountFilter);
+      if (this.msgQuery) {
+        const q = this.msgQuery.toLowerCase();
+        out = out.filter(r =>
+          (r.content || '').toLowerCase().includes(q) ||
+          (r.sender || '').toLowerCase().includes(q)
+        );
+      }
+      return out.slice().reverse();
     },
+    filteredAudit() {
+      if (!this.accountFilter) return this.auditItems;
+      return this.auditItems.filter(a => !a.account || a.account === this.accountFilter);
+    },
+
     tabLabel(t) {
       return { logs: '日志', messages: '消息', orders: '订单', contacts: '联系人' }[t];
     },

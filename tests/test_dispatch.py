@@ -102,3 +102,28 @@ def test_fallback_to_llm(dispatcher, wx, llm):
     dispatcher.handle(make_msg(content="random chat"))
     llm.get_answer.assert_called_once()
     wx.send_text.assert_called()
+
+
+def test_paused_state_blocks_user_messages(dispatcher, wx, llm):
+    from dashboard.state import get_state, reset_state
+    reset_state()
+    get_state().pause("test")
+    try:
+        dispatcher.handle(make_msg(content="hi"))
+        llm.get_answer.assert_not_called()
+        wx.send_text.assert_not_called()
+    finally:
+        reset_state()
+
+
+def test_paused_state_still_records_messages(dispatcher, wx, llm):
+    from dashboard.state import get_state, reset_state
+    reset_state()
+    get_state().pause("test")
+    try:
+        dispatcher.handle(make_msg(content="should be logged"))
+        msgs = get_state().messages.snapshot()
+        contents = [e["content"] for _, e in msgs]
+        assert "should be logged" in contents
+    finally:
+        reset_state()

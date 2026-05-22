@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import logging
 import signal
 from argparse import ArgumentParser
 from pathlib import Path
@@ -8,6 +9,9 @@ from pathlib import Path
 from base.func_report_reminder import ReportReminder
 from configuration import Config
 from constants import ChatType
+from dashboard import log_handler as dash_log
+from dashboard.server import run_in_thread as start_dashboard
+from dashboard.state import get_state
 from robot import Robot, __version__
 from wx import WxAdapter
 
@@ -28,6 +32,10 @@ def weather_report(robot: Robot) -> None:
 
 
 def main(chat_type: int):
+    # Install dashboard log capture BEFORE anything else so all subsequent
+    # log lines are visible in the web UI.
+    dash_log.install(root_level=logging.INFO)
+
     config = Config()
     wcf = WxAdapter(
         weixin_exe=Path(config.WEIXIN.get("exe", "")),
@@ -38,6 +46,10 @@ def main(chat_type: int):
     )
     wcf.setup()
 
+    # Expose adapter to the dashboard for status/contacts/queue-depth.
+    state = get_state()
+    state.wx_adapter = wcf
+
     def handler(sig, frame):
         wcf.cleanup()
         exit(0)
@@ -45,6 +57,13 @@ def main(chat_type: int):
     signal.signal(signal.SIGINT, handler)
 
     robot = Robot(config, wcf, chat_type)
+    state.order_handler = getattr(robot.dispatcher, "order", None)
+
+    # Launch dashboard web server in a background thread (non-blocking).
+    dash_port = int(config.WEIXIN.get("dashboard_port", 9090))
+    start_dashboard(host="127.0.0.1", port=dash_port)
+    robot.LOG.info(f"Dashboard 启动: http://127.0.0.1:{dash_port}")
+
     robot.LOG.info(f"WeChatRobot【{__version__}】成功启动···")
 
     # 机器人启动发送测试消息

@@ -1,11 +1,41 @@
 from __future__ import annotations
 import logging
+import time
 from pathlib import Path
 
 from wx.msg import WxMsg
 from router.template import TemplateMatcher, TemplateAction
 
 LOG = logging.getLogger(__name__)
+
+
+def _safe_record_message(msg: WxMsg) -> None:
+    """Push the incoming message into BotState.messages for the dashboard.
+
+    Lazy import + broad except so router code stays decoupled from the
+    dashboard package; if dashboard isn't installed/initialized this is a no-op.
+    """
+    try:
+        from dashboard.state import get_state
+        get_state().messages.append({
+            "ts": msg.ts or int(time.time()),
+            "id": msg.id,
+            "type": msg.type,
+            "sender": msg.sender,
+            "roomid": msg.roomid,
+            "content": msg.content,
+            "is_self": msg.is_self,
+        })
+    except Exception:
+        pass
+
+
+def _is_paused() -> bool:
+    try:
+        from dashboard.state import get_state
+        return get_state().paused
+    except Exception:
+        return False
 
 
 class Dispatcher:
@@ -27,6 +57,12 @@ class Dispatcher:
         self._self_wxid = wx.get_self_wxid()
 
     def handle(self, msg: WxMsg) -> None:
+        _safe_record_message(msg)
+        if _is_paused() and not msg.from_self() and msg.type != 37:
+            # When paused, ignore message-driven actions but still let
+            # self/system events flow (already early-returned in _handle).
+            LOG.debug("dispatcher paused; dropping msg %s", msg.id)
+            return
         try:
             self._handle(msg)
         except Exception as e:

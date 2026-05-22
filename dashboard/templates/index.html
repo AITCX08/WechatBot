@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WeChatRobot Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+  .mono { font-family: "JetBrains Mono", Menlo, Consolas, "Courier New", monospace; font-size: 12px; }
+  .log-DEBUG  { color: #6b7280; }
+  .log-INFO   { color: #1f2937; }
+  .log-WARNING{ color: #b45309; }
+  .log-ERROR  { color: #b91c1c; font-weight: 600; }
+  .log-CRITICAL { color: #7f1d1d; background: #fef2f2; font-weight: 700; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:9999px; font-size:11px; font-weight:600; }
+  .dot { width:6px; height:6px; border-radius:9999px; display:inline-block; }
+  .tab-active { border-color:#1f2937; color:#1f2937; }
+  .tab-inactive { border-color:transparent; color:#6b7280; }
+</style>
+</head>
+<body class="bg-zinc-50 text-zinc-900">
+<div x-data="app()" x-init="init()" class="min-h-screen">
+
+  <!-- Top bar -->
+  <header class="bg-white border-b border-zinc-200 sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-zinc-900 text-white grid place-items-center font-bold">W</div>
+        <div>
+          <div class="text-sm font-semibold">WeChatRobot Dashboard</div>
+          <div class="text-xs text-zinc-500">Weixin 4.x · sidecar + UIA · 自动下单</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <template x-if="status.paused">
+          <button @click="resume()" class="px-3 py-1.5 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700">
+            ▶ 恢复
+          </button>
+        </template>
+        <template x-if="!status.paused">
+          <button @click="pause()" class="px-3 py-1.5 rounded bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600">
+            ⏸ 暂停
+          </button>
+        </template>
+        <span class="pill" :class="status.paused ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
+          <span class="dot" :class="status.paused ? 'bg-amber-500' : 'bg-emerald-500'"></span>
+          <span x-text="status.paused ? '已暂停' : '运行中'"></span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-6">
+
+    <!-- Status cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+      <div class="bg-white rounded-lg border border-zinc-200 p-3">
+        <div class="text-xs text-zinc-500">运行时长</div>
+        <div class="text-lg font-semibold mt-1" x-text="formatUptime(status.uptime_sec || 0)"></div>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 p-3">
+        <div class="text-xs text-zinc-500">Sidecar</div>
+        <div class="text-lg font-semibold mt-1 flex items-center gap-2">
+          <span class="dot" :class="status.sidecar_alive ? 'bg-emerald-500' : 'bg-zinc-400'"></span>
+          <span x-text="status.sidecar_alive ? '存活' : '离线'"></span>
+        </div>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 p-3">
+        <div class="text-xs text-zinc-500">Weixin 窗口</div>
+        <div class="text-lg font-semibold mt-1 flex items-center gap-2">
+          <span class="dot" :class="status.weixin_attached ? 'bg-emerald-500' : 'bg-zinc-400'"></span>
+          <span x-text="status.weixin_attached ? '已附加' : '未附加'"></span>
+        </div>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 p-3">
+        <div class="text-xs text-zinc-500">消息队列</div>
+        <div class="text-lg font-semibold mt-1" x-text="status.queue_depth || 0"></div>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 p-3">
+        <div class="text-xs text-zinc-500">待确认订单</div>
+        <div class="text-lg font-semibold mt-1" x-text="status.pending_orders || 0"></div>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 p-3">
+        <div class="text-xs text-zinc-500">今日订单</div>
+        <div class="text-lg font-semibold mt-1" x-text="status.daily_orders || 0"></div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="bg-white rounded-lg border border-zinc-200">
+      <div class="border-b border-zinc-200 flex">
+        <template x-for="t in ['logs','messages','orders','contacts']" :key="t">
+          <button @click="tab = t"
+            class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px"
+            :class="tab === t ? 'tab-active' : 'tab-inactive hover:text-zinc-700'">
+            <span x-text="tabLabel(t)"></span>
+          </button>
+        </template>
+        <div class="flex-1"></div>
+        <div class="px-3 py-2 text-xs text-zinc-500 self-center">
+          实时更新 · <span x-text="lastUpdate"></span>
+        </div>
+      </div>
+
+      <!-- Logs tab -->
+      <div x-show="tab === 'logs'" class="p-4">
+        <div class="flex gap-2 mb-3">
+          <select x-model="logLevel" class="border border-zinc-300 rounded px-2 py-1.5 text-sm">
+            <option value="">全部级别</option>
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO">INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+            <option value="CRITICAL">CRITICAL</option>
+          </select>
+          <input x-model.debounce.300ms="logQuery" type="text" placeholder="关键词搜索..."
+            class="flex-1 border border-zinc-300 rounded px-3 py-1.5 text-sm" />
+          <button @click="autoScroll = !autoScroll"
+            class="px-3 py-1.5 rounded border text-xs"
+            :class="autoScroll ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-700 border-zinc-300'">
+            自动滚动
+          </button>
+          <button @click="clearLogs()" class="px-3 py-1.5 rounded border border-zinc-300 text-xs">清空显示</button>
+        </div>
+        <div x-ref="logBox" class="mono bg-zinc-50 border border-zinc-200 rounded h-[480px] overflow-auto p-3 leading-relaxed">
+          <template x-for="row in filteredLogs()" :key="row.seq">
+            <div class="flex gap-3" :class="'log-' + row.level">
+              <span class="text-zinc-400 shrink-0" x-text="formatTs(row.ts)"></span>
+              <span class="shrink-0 w-16 uppercase" x-text="row.level"></span>
+              <span class="shrink-0 text-zinc-500" x-text="row.logger"></span>
+              <span class="break-all" x-text="row.message"></span>
+            </div>
+          </template>
+          <div x-show="filteredLogs().length === 0" class="text-zinc-400 italic">无日志</div>
+        </div>
+      </div>
+
+      <!-- Messages tab -->
+      <div x-show="tab === 'messages'" class="p-4">
+        <div class="flex gap-2 mb-3">
+          <input x-model.debounce.300ms="msgQuery" type="text" placeholder="搜索发送者 / 内容..."
+            class="flex-1 border border-zinc-300 rounded px-3 py-1.5 text-sm" />
+        </div>
+        <div class="h-[480px] overflow-auto border border-zinc-200 rounded">
+          <table class="w-full text-sm">
+            <thead class="bg-zinc-50 text-xs text-zinc-500 uppercase sticky top-0">
+              <tr>
+                <th class="text-left px-3 py-2 w-32">时间</th>
+                <th class="text-left px-3 py-2 w-12">类型</th>
+                <th class="text-left px-3 py-2 w-40">发送者</th>
+                <th class="text-left px-3 py-2 w-40">群</th>
+                <th class="text-left px-3 py-2">内容</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="row in filteredMessages()" :key="row.seq">
+                <tr class="border-t border-zinc-100 hover:bg-zinc-50">
+                  <td class="px-3 py-2 text-xs text-zinc-500" x-text="formatTs(row.ts)"></td>
+                  <td class="px-3 py-2 text-xs" x-text="row.type"></td>
+                  <td class="px-3 py-2 mono text-xs" x-text="row.sender"></td>
+                  <td class="px-3 py-2 mono text-xs text-zinc-500" x-text="row.roomid || '-'"></td>
+                  <td class="px-3 py-2 break-all" x-text="row.content"></td>
+                </tr>
+              </template>
+              <tr x-show="filteredMessages().length === 0">
+                <td colspan="5" class="px-3 py-6 text-center text-zinc-400 italic">无消息</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Orders tab -->
+      <div x-show="tab === 'orders'" class="p-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <h3 class="text-sm font-semibold mb-2 text-zinc-700">待确认订单</h3>
+            <div class="border border-zinc-200 rounded h-[420px] overflow-auto">
+              <template x-for="o in pendingOrders" :key="o.wxid">
+                <div class="border-b border-zinc-100 p-3 text-sm">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="mono text-xs text-zinc-500" x-text="o.wxid"></span>
+                    <span class="text-xs text-amber-600" x-text="'第 ' + (o.extract_rounds || 0) + ' 轮'"></span>
+                  </div>
+                  <div class="text-zinc-700">
+                    <div x-text="'学校: ' + (o.school || '—')"></div>
+                    <div x-text="'课程: ' + (o.kcname || '—') + ' (' + (o.kcid || '—') + ')'"></div>
+                    <div x-text="'账号: ' + (o.user || '—')"></div>
+                    <div x-text="'平台: ' + (o.platform || '—')"></div>
+                  </div>
+                </div>
+              </template>
+              <div x-show="!pendingOrders.length" class="text-zinc-400 italic p-3">无待确认订单</div>
+            </div>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold mb-2 text-zinc-700">最近事件</h3>
+            <div class="border border-zinc-200 rounded h-[420px] overflow-auto">
+              <table class="w-full text-sm">
+                <tbody>
+                  <template x-for="a in auditItems.slice().reverse()" :key="a.seq">
+                    <tr class="border-b border-zinc-100">
+                      <td class="px-3 py-2 text-xs text-zinc-500 w-28" x-text="formatTs(a.ts)"></td>
+                      <td class="px-3 py-2">
+                        <span class="pill" :class="eventClass(a.event)" x-text="a.event"></span>
+                      </td>
+                      <td class="px-3 py-2 mono text-xs text-zinc-500" x-text="a.wxid || (a.draft && a.draft.requester_wxid) || '-'"></td>
+                    </tr>
+                  </template>
+                  <tr x-show="!auditItems.length">
+                    <td colspan="3" class="px-3 py-6 text-center text-zinc-400 italic">无事件</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contacts tab -->
+      <div x-show="tab === 'contacts'" class="p-4">
+        <div class="flex gap-2 mb-3">
+          <input x-model.debounce.300ms="contactQuery" type="text" placeholder="搜索 wxid 或备注..."
+            class="flex-1 border border-zinc-300 rounded px-3 py-1.5 text-sm" />
+          <button @click="loadContacts()" class="px-3 py-1.5 rounded border border-zinc-300 text-xs">刷新</button>
+          <span class="self-center text-xs text-zinc-500" x-text="'共 ' + contactTotal + ' 条'"></span>
+        </div>
+        <div class="h-[460px] overflow-auto border border-zinc-200 rounded">
+          <table class="w-full text-sm">
+            <thead class="bg-zinc-50 text-xs text-zinc-500 uppercase sticky top-0">
+              <tr>
+                <th class="text-left px-3 py-2 w-64">wxid</th>
+                <th class="text-left px-3 py-2">备注/昵称</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="c in contacts" :key="c.wxid">
+                <tr class="border-t border-zinc-100 hover:bg-zinc-50">
+                  <td class="px-3 py-2 mono text-xs" x-text="c.wxid"></td>
+                  <td class="px-3 py-2" x-text="c.name"></td>
+                </tr>
+              </template>
+              <tr x-show="!contacts.length">
+                <td colspan="2" class="px-3 py-6 text-center text-zinc-400 italic">无联系人</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="text-xs text-zinc-400 text-center mt-6">
+      127.0.0.1:9090 · SSE 实时推送 · 仅本机访问
+    </div>
+  </main>
+</div>
+
+<script>
+function app() {
+  return {
+    tab: 'logs',
+    status: {},
+    logs: [],
+    logLevel: '',
+    logQuery: '',
+    autoScroll: true,
+    messages: [],
+    msgQuery: '',
+    auditItems: [],
+    pendingOrders: [],
+    contacts: [],
+    contactQuery: '',
+    contactTotal: 0,
+    lastUpdate: '',
+    es: null,
+
+    init() {
+      this.bootstrap();
+      this.openStream();
+      this.timer = setInterval(() => this.refreshPending(), 5000);
+      this.$watch('contactQuery', () => this.loadContacts());
+      this.loadContacts();
+    },
+    bootstrap() {
+      fetch('/api/logs?n=200').then(r => r.json()).then(d => { this.logs = d.items; this.scrollLogs(); });
+      fetch('/api/messages?n=100').then(r => r.json()).then(d => { this.messages = d.items; });
+      fetch('/api/audit?n=100').then(r => r.json()).then(d => { this.auditItems = d.items; });
+    },
+    openStream() {
+      this.es = new EventSource('/api/events');
+      this.es.addEventListener('status', e => {
+        this.status = JSON.parse(e.data);
+        this.lastUpdate = new Date().toLocaleTimeString();
+      });
+      this.es.addEventListener('logs', e => {
+        const newLogs = JSON.parse(e.data);
+        this.logs = [...this.logs, ...newLogs].slice(-1000);
+        this.scrollLogs();
+      });
+      this.es.addEventListener('messages', e => {
+        const newMsgs = JSON.parse(e.data);
+        this.messages = [...this.messages, ...newMsgs].slice(-500);
+      });
+      this.es.addEventListener('audit', e => {
+        const newAudit = JSON.parse(e.data);
+        this.auditItems = [...this.auditItems, ...newAudit].slice(-500);
+      });
+    },
+    scrollLogs() {
+      if (!this.autoScroll) return;
+      this.$nextTick(() => {
+        const el = this.$refs.logBox;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+    pause() {
+      fetch('/api/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'manual' }) })
+        .then(() => this.refreshStatus());
+    },
+    resume() {
+      fetch('/api/resume', { method: 'POST' }).then(() => this.refreshStatus());
+    },
+    refreshStatus() {
+      fetch('/api/status').then(r => r.json()).then(d => this.status = d);
+    },
+    refreshPending() {
+      fetch('/api/orders/pending').then(r => r.json()).then(d => this.pendingOrders = d.items || []);
+    },
+    loadContacts() {
+      const q = this.contactQuery ? `?q=${encodeURIComponent(this.contactQuery)}` : '';
+      fetch('/api/contacts' + q).then(r => r.json()).then(d => {
+        this.contacts = d.items || [];
+        this.contactTotal = d.total || 0;
+      });
+    },
+    clearLogs() { this.logs = []; },
+    filteredLogs() {
+      let out = this.logs;
+      if (this.logLevel) out = out.filter(r => r.level === this.logLevel);
+      if (this.logQuery) {
+        const q = this.logQuery.toLowerCase();
+        out = out.filter(r => (r.message || '').toLowerCase().includes(q));
+      }
+      return out;
+    },
+    filteredMessages() {
+      if (!this.msgQuery) return this.messages.slice().reverse();
+      const q = this.msgQuery.toLowerCase();
+      return this.messages.filter(r =>
+        (r.content || '').toLowerCase().includes(q) ||
+        (r.sender || '').toLowerCase().includes(q)
+      ).reverse();
+    },
+    tabLabel(t) {
+      return { logs: '日志', messages: '消息', orders: '订单', contacts: '联系人' }[t];
+    },
+    formatTs(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      return d.toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    },
+    formatUptime(s) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m ${sec}s`;
+      return `${sec}s`;
+    },
+    eventClass(ev) {
+      if (!ev) return 'bg-zinc-100 text-zinc-700 border border-zinc-200';
+      if (ev.includes('error') || ev.includes('abort')) return 'bg-red-50 text-red-700 border border-red-200';
+      if (ev.includes('cancel')) return 'bg-amber-50 text-amber-700 border border-amber-200';
+      if (ev.includes('dry_run')) return 'bg-sky-50 text-sky-700 border border-sky-200';
+      if (ev.startsWith('place')) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+      return 'bg-zinc-100 text-zinc-700 border border-zinc-200';
+    },
+  };
+}
+</script>
+</body>
+</html>

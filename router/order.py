@@ -178,6 +178,12 @@ class OrderHandler:
         event["ts"] = int(time.time())
         with self.audit_log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        # Mirror into the dashboard ring buffer (best-effort).
+        try:
+            from dashboard.state import get_state
+            get_state().audit.append(event)
+        except Exception:
+            pass
 
     def _count_today_orders(self) -> int:
         if not self.audit_log_path.exists():

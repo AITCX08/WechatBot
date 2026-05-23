@@ -15,6 +15,7 @@ class WxMsg:
     content: str             # text content or XML payload
     is_self: bool
     ts: int
+    receiver: str = ""       # destination wxid (for DMs); used to detect filehelper
 
     def from_group(self) -> bool:
         return bool(self.roomid)

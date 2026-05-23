@@ -39,3 +39,13 @@ def test_is_at_false_when_no_at():
 def test_is_at_false_in_dm():
     m = make_msg(content="@bot", roomid="")
     assert m.is_at("wxid_bot") is False
+
+
+def test_receiver_defaults_to_empty():
+    m = make_msg()
+    assert m.receiver == ""
+
+
+def test_receiver_can_be_set():
+    m = make_msg(receiver="filehelper")
+    assert m.receiver == "filehelper"

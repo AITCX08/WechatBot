@@ -127,6 +127,7 @@ class ReceiveBackend:
                 content=str(d.get("content", "")),
                 is_self=bool(d.get("is_send", 0)),
                 ts=int(d.get("timestamp", 0)),
+                receiver=str(d.get("to_user", "")),
             )
         except (KeyError, ValueError, TypeError) as e:
             LOG.warning("malformed message event %r: %s", event, e)

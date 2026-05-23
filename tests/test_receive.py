@@ -27,6 +27,7 @@ def test_translate_text_dm(backend):
     assert msg.roomid == ""
     assert msg.content == "hi bot"
     assert msg.is_self is False
+    assert msg.receiver == "wxid_self"
 
 
 def test_translate_group_at(backend):
@@ -34,16 +35,19 @@ def test_translate_group_at(backend):
     assert msg.roomid == "123@chatroom"
     assert msg.from_group() is True
     assert msg.is_at("wxid_bot") is True
+    assert msg.receiver == "123@chatroom"
 
 
 def test_translate_friend_request(backend):
     msg = backend._translate_event(evs.FRIEND_REQUEST)
     assert msg.type == 37
+    assert msg.receiver == "wxid_self"
 
 
 def test_translate_self_message_flag(backend):
     msg = backend._translate_event(evs.SELF_MESSAGE)
     assert msg.is_self is True
+    assert msg.receiver == "wxid_alice"
 
 
 def test_translate_unrelated_event_returns_none(backend):
@@ -62,3 +66,22 @@ def test_enqueue_via_internal_pipe(backend, queue):
     assert m2.id == 1002
     with pytest.raises(Empty):
         queue.get_nowait()
+
+
+def test_translate_event_with_missing_to_user(backend):
+    event = {
+        "event_type": "new_message",
+        "data": {
+            "msg_id": 9999,
+            "type": 1,
+            "from_user": "wxid_x",
+            "room_id": "",
+            "content": "hi",
+            "is_send": 0,
+            "timestamp": 1700000000,
+            # to_user intentionally absent
+        },
+    }
+    msg = backend._translate_event(event)
+    assert msg is not None
+    assert msg.receiver == ""

@@ -136,6 +136,10 @@ class AccountManager:
     def set_factory(self, fac: BotFactory) -> None:
         self._factory = fac
 
+    @property
+    def factory_registered(self) -> bool:
+        return self._factory is not None
+
     def register(self, cfg: AccountConfig) -> AccountState:
         with self._lock:
             if cfg.name in self._accounts:

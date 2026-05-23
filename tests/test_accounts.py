@@ -145,3 +145,10 @@ def test_snapshot_all_returns_list():
     assert len(snaps) == 2
     assert any(s["name"] == "a" and s["label"] == "Account A" for s in snaps)
     assert all(s["status"] == "stopped" for s in snaps)
+
+
+def test_factory_registered_property():
+    m = AccountManager()
+    assert m.factory_registered is False
+    m.set_factory(lambda c, s: (None, None, None))
+    assert m.factory_registered is True

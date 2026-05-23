@@ -258,3 +258,17 @@ def test_status_includes_account_aggregate(client):
     data = r.json()
     assert data["account_count"] == 2
     assert len(data["accounts"]) == 2
+
+
+def test_status_reports_factory_registered_false_by_default(client):
+    r = client.get("/api/status")
+    data = r.json()
+    assert data["factory_registered"] is False
+
+
+def test_status_reports_factory_registered_true_after_set(client):
+    s = get_state()
+    s.accounts.set_factory(lambda cfg, st: (MagicMock(), MagicMock(), MagicMock()))
+    r = client.get("/api/status")
+    data = r.json()
+    assert data["factory_registered"] is True

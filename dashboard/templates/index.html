@@ -65,7 +65,32 @@
     </div>
   </header>
 
+  <!-- Toast notifications (fixed bottom-right) -->
+  <div class="fixed bottom-4 right-4 z-50 space-y-2 max-w-md">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="rounded-lg shadow-lg px-4 py-3 text-sm border"
+           :class="{
+             'bg-red-50 border-red-200 text-red-800':   t.kind === 'error',
+             'bg-emerald-50 border-emerald-200 text-emerald-800': t.kind === 'success',
+             'bg-zinc-50 border-zinc-200 text-zinc-800': t.kind === 'info',
+           }">
+        <span class="font-semibold mr-2" x-text="t.kind === 'error' ? '❗' : t.kind === 'success' ? '✅' : 'ℹ️'"></span>
+        <span x-text="t.message"></span>
+      </div>
+    </template>
+  </div>
+
   <main class="max-w-7xl mx-auto px-6 py-6">
+
+    <!-- Standalone-mode banner -->
+    <template x-if="status.factory_registered === false">
+      <div class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <span class="font-semibold">⚠ Dashboard 处于 standalone 预览模式</span>
+        ——bot factory 未注册，"启动" 按钮已禁用。要真正启动 bot，请运行
+        <code class="bg-amber-100 px-1.5 py-0.5 rounded mx-1">python main.py -c 7</code>
+        （或带 <code class="bg-amber-100 px-1.5 py-0.5 rounded">--auto-start</code> 自动拉起所有账号）。
+      </div>
+    </template>
 
     <!-- Overall metrics -->
     <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
@@ -136,7 +161,9 @@
 
               <div class="flex flex-wrap gap-1.5">
                 <template x-if="acc.status === 'stopped' || acc.status === 'error'">
-                  <button @click="accStart(acc.name)" class="btn btn-success">▶ 启动</button>
+                  <button @click="accStart(acc.name)" :disabled="!status.factory_registered"
+                          :title="status.factory_registered ? '' : 'Standalone 模式不能启动 bot；请用 python main.py -c 7'"
+                          class="btn btn-success">▶ 启动</button>
                 </template>
                 <template x-if="acc.status === 'running' && !acc.paused">
                   <button @click="accPause(acc.name)" class="btn btn-warning">⏸ 暂停</button>
@@ -353,6 +380,8 @@ function app() {
     accountFilter: '',
     lastUpdate: '',
     es: null,
+    toasts: [],
+    _toastSeq: 0,
 
     init() {
       this.bootstrap();
@@ -396,19 +425,65 @@ function app() {
       });
     },
 
+    // ---- toast ----
+    showToast(kind, message, timeoutMs = 4000) {
+      const id = ++this._toastSeq;
+      this.toasts.push({ id, kind, message });
+      setTimeout(() => {
+        this.toasts = this.toasts.filter(t => t.id !== id);
+      }, timeoutMs);
+    },
+
+    // ---- generic API helper ----
+    // POST helper that reads response, toasts on error, refreshes status on success.
+    async apiCall(method, url, opts = {}) {
+      const { body = null, successMsg = null, errorPrefix = '操作失败' } = opts;
+      const init = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body !== null) init.body = JSON.stringify(body);
+      try {
+        const resp = await fetch(url, init);
+        let data = null;
+        try { data = await resp.json(); } catch (_) { /* non-json response */ }
+        if (!resp.ok) {
+          const detail = (data && (data.detail || data.msg)) || `HTTP ${resp.status}`;
+          this.showToast('error', `${errorPrefix}: ${detail}`);
+          return { ok: false, detail };
+        }
+        if (successMsg) this.showToast('success', successMsg);
+        // refresh status immediately (don't wait 1s for next SSE tick)
+        this.refreshStatus();
+        return { ok: true, data };
+      } catch (e) {
+        this.showToast('error', `${errorPrefix}: ${e.message || e}`);
+        return { ok: false, detail: e.message || String(e) };
+      }
+    },
+
     // ---- global controls ----
     globalPause() {
-      fetch('/api/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'manual' }) });
+      this.apiCall('POST', '/api/pause', { body: { reason: 'manual' }, successMsg: '全局已暂停' });
     },
     globalResume() {
-      fetch('/api/resume', { method: 'POST' });
+      this.apiCall('POST', '/api/resume', { successMsg: '全局已恢复' });
     },
 
     // ---- per-account controls ----
-    accStart(name) { fetch(`/api/accounts/${name}/start`, { method: 'POST' }); },
-    accStop(name)  { fetch(`/api/accounts/${name}/stop`,  { method: 'POST' }); },
-    accPause(name) { fetch(`/api/accounts/${name}/pause`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'manual' }) }); },
-    accResume(name) { fetch(`/api/accounts/${name}/resume`, { method: 'POST' }); },
+    accStart(name) {
+      this.apiCall('POST', `/api/accounts/${name}/start`,
+        { successMsg: `[${name}] 启动中... 看日志页确认登录进度`, errorPrefix: `[${name}] 启动失败` });
+    },
+    accStop(name) {
+      this.apiCall('POST', `/api/accounts/${name}/stop`,
+        { successMsg: `[${name}] 已停止`, errorPrefix: `[${name}] 停止失败` });
+    },
+    accPause(name) {
+      this.apiCall('POST', `/api/accounts/${name}/pause`,
+        { body: { reason: 'manual' }, successMsg: `[${name}] 已暂停`, errorPrefix: `[${name}] 暂停失败` });
+    },
+    accResume(name) {
+      this.apiCall('POST', `/api/accounts/${name}/resume`,
+        { successMsg: `[${name}] 已恢复`, errorPrefix: `[${name}] 恢复失败` });
+    },
 
     refreshPending() {
       const q = this.accountFilter ? `?account=${encodeURIComponent(this.accountFilter)}` : '';

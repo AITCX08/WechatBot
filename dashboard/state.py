@@ -64,6 +64,7 @@ class BotState:
             "audit_count": len(self.audit),
             "account_count": len(self.accounts.names()),
             "accounts": self.accounts.snapshot_all(),
+            "factory_registered": self.accounts.factory_registered,
             # Legacy aggregate fields (sum across accounts + legacy default):
             "sidecar_alive": False,
             "weixin_attached": False,

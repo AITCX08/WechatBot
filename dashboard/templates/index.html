@@ -65,6 +65,55 @@
     </div>
   </header>
 
+  <!-- Add-account modal -->
+  <div x-show="showAddModal" @keydown.escape.window="closeAddAccount()"
+       class="fixed inset-0 z-40 bg-black/40 grid place-items-center" x-cloak>
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="px-5 py-3 border-b border-zinc-200 flex items-center justify-between">
+        <h3 class="font-semibold">添加账号</h3>
+        <button @click="closeAddAccount()" class="text-zinc-400 hover:text-zinc-700">✕</button>
+      </div>
+      <form @submit.prevent="submitAddAccount()" class="p-5 space-y-3">
+        <div>
+          <label class="block text-xs text-zinc-600 mb-1">名称（英文唯一标识，必填）</label>
+          <input x-model="newAcc.name" required pattern="[a-zA-Z0-9_\-]{1,32}"
+                 placeholder="如 main / support / test"
+                 class="w-full border border-zinc-300 rounded px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-zinc-600 mb-1">显示名（UI 用，可中文）</label>
+          <input x-model="newAcc.label" placeholder="如 主账号 / 客服号"
+                 class="w-full border border-zinc-300 rounded px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-zinc-600 mb-1">Weixin.exe 路径</label>
+          <input x-model="newAcc.exe"
+                 placeholder="C:/Program Files/Tencent/Weixin/Weixin.exe"
+                 class="w-full border border-zinc-300 rounded px-2 py-1.5 text-sm mono" />
+          <p class="text-xs text-zinc-500 mt-1">多账号需复制 Weixin 目录到不同位置，每个实例指向各自副本</p>
+        </div>
+        <div>
+          <label class="block text-xs text-zinc-600 mb-1">Sidecar URL（每账号独占端口）</label>
+          <input x-model="newAcc.sidecar_url"
+                 placeholder="http://127.0.0.1:5678"
+                 class="w-full border border-zinc-300 rounded px-2 py-1.5 text-sm mono" />
+        </div>
+        <div>
+          <label class="block text-xs text-zinc-600 mb-1">解密 DB 路径（留空自动设为 ./wx/decrypted/{name}/contact.db）</label>
+          <input x-model="newAcc.decrypted_db_path"
+                 placeholder="./wx/decrypted/main/contact.db"
+                 class="w-full border border-zinc-300 rounded px-2 py-1.5 text-sm mono" />
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" @click="closeAddAccount()" class="btn btn-ghost">取消</button>
+          <button type="submit" class="btn btn-primary">添加</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <style>[x-cloak] { display: none !important; }</style>
+
   <!-- Toast notifications (fixed bottom-right) -->
   <div class="fixed bottom-4 right-4 z-50 space-y-2 max-w-md">
     <template x-for="t in toasts" :key="t.id">
@@ -120,7 +169,10 @@
     <div class="bg-white rounded-lg border border-zinc-200 mb-6">
       <div class="px-4 py-3 border-b border-zinc-200 flex items-center justify-between">
         <h2 class="text-sm font-semibold">账号列表</h2>
-        <span class="text-xs text-zinc-500" x-text="'共 ' + (status.accounts?.length || 0) + ' 个'"></span>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-zinc-500" x-text="'共 ' + (status.accounts?.length || 0) + ' 个'"></span>
+          <button @click="openAddAccount()" class="btn btn-primary">+ 添加账号</button>
+        </div>
       </div>
       <div class="p-4">
         <template x-if="!status.accounts?.length">
@@ -175,6 +227,9 @@
                   <button @click="accStop(acc.name)" class="btn btn-danger">■ 停止</button>
                 </template>
                 <button @click="accountFilter = acc.name; tab = 'logs'" class="btn btn-ghost">📋 查看</button>
+                <template x-if="acc.status === 'stopped' || acc.status === 'error'">
+                  <button @click="accDelete(acc.name)" class="btn btn-ghost text-red-600 hover:bg-red-50">🗑 删除</button>
+                </template>
               </div>
             </div>
           </template>
@@ -382,6 +437,11 @@ function app() {
     es: null,
     toasts: [],
     _toastSeq: 0,
+    showAddModal: false,
+    newAcc: {
+      name: '', label: '', exe: 'C:/Program Files/Tencent/Weixin/Weixin.exe',
+      sidecar_url: 'http://127.0.0.1:5678', decrypted_db_path: '',
+    },
 
     init() {
       this.bootstrap();
@@ -483,6 +543,29 @@ function app() {
     accResume(name) {
       this.apiCall('POST', `/api/accounts/${name}/resume`,
         { successMsg: `[${name}] 已恢复`, errorPrefix: `[${name}] 恢复失败` });
+    },
+    accDelete(name) {
+      if (!confirm(`确认删除账号「${name}」？\n（仅从内存移除；若账号定义在 config.yaml 中，重启会恢复）`)) return;
+      this.apiCall('DELETE', `/api/accounts/${name}`,
+        { successMsg: `[${name}] 已删除`, errorPrefix: `[${name}] 删除失败` });
+    },
+
+    // ---- add-account modal ----
+    openAddAccount() {
+      this.newAcc = {
+        name: '', label: '', exe: 'C:/Program Files/Tencent/Weixin/Weixin.exe',
+        sidecar_url: 'http://127.0.0.1:5678', decrypted_db_path: '',
+      };
+      this.showAddModal = true;
+    },
+    closeAddAccount() { this.showAddModal = false; },
+    async submitAddAccount() {
+      const r = await this.apiCall('POST', '/api/accounts', {
+        body: this.newAcc,
+        successMsg: `账号 ${this.newAcc.name} 已添加`,
+        errorPrefix: '添加失败',
+      });
+      if (r.ok) this.closeAddAccount();
     },
 
     refreshPending() {

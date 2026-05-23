@@ -19,3 +19,4 @@ logs/audit/*.jsonl
 wx/sidecar/wechat-decrypt/.venv/
 wx/decrypted/
 wx/sidecar/wechat-decrypt/output/
+data/

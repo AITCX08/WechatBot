@@ -272,3 +272,76 @@ def test_status_reports_factory_registered_true_after_set(client):
     r = client.get("/api/status")
     data = r.json()
     assert data["factory_registered"] is True
+
+
+# ----- account CRUD via API -----
+
+def test_create_account_via_post(client):
+    r = client.post("/api/accounts", json={
+        "name": "newacc", "label": "新账号",
+        "exe": "C:/x/Weixin.exe",
+    })
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    listed = client.get("/api/accounts").json()["items"]
+    assert any(i["name"] == "newacc" and i["label"] == "新账号" for i in listed)
+
+
+def test_create_account_duplicate_rejected(client):
+    _register_account(client.app.dependency_overrides.get("state") or get_state(), "dup")
+    r = client.post("/api/accounts", json={"name": "dup"})
+    assert r.status_code == 400
+    assert "已存在" in r.json()["detail"]
+
+
+def test_create_account_invalid_name_rejected(client):
+    r = client.post("/api/accounts", json={"name": "bad name with spaces"})
+    assert r.status_code == 422   # pydantic validation
+
+
+def test_create_account_default_decrypted_db_path(client):
+    r = client.post("/api/accounts", json={"name": "acc1"})
+    assert r.status_code == 200
+    state = get_state()
+    cfg = state.accounts.get("acc1").config
+    assert cfg.decrypted_db_path == "./wx/decrypted/acc1/contact.db"
+
+
+def test_delete_account(client):
+    _register_account(get_state(), "doomed")
+    r = client.delete("/api/accounts/doomed")
+    assert r.status_code == 200
+    assert get_state().accounts.get("doomed") is None
+
+
+def test_delete_running_account_rejected(client):
+    from dashboard.accounts import AccountStatus
+    s = _register_account(get_state(), "alive")
+    s.status = AccountStatus.RUNNING
+    r = client.delete("/api/accounts/alive")
+    assert r.status_code == 400
+    assert "stop it first" in r.json()["detail"].lower() or "cannot remove" in r.json()["detail"].lower()
+
+
+def test_delete_unknown_account_returns_400(client):
+    r = client.delete("/api/accounts/ghost")
+    assert r.status_code == 400
+
+
+def test_create_account_triggers_persistence(client):
+    s = get_state()
+    persisted = []
+    s.accounts.set_persistence(lambda lst: persisted.append([c.name for c in lst]))
+    r = client.post("/api/accounts", json={"name": "persistme"})
+    assert r.status_code == 200
+    assert persisted and "persistme" in persisted[-1]
+
+
+def test_delete_account_triggers_persistence(client):
+    s = get_state()
+    _register_account(s, "todel")
+    persisted = []
+    s.accounts.set_persistence(lambda lst: persisted.append([c.name for c in lst]))
+    r = client.delete("/api/accounts/todel")
+    assert r.status_code == 200
+    assert persisted and "todel" not in persisted[-1]

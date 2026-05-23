@@ -131,6 +131,9 @@ class AccountManager:
         self._accounts: dict[str, AccountState] = {}
         self._factory: Optional[BotFactory] = None
         self._lock = threading.Lock()
+        # Persistence callback (set by main.py); invoked after register/unregister
+        # with the list of accounts that should survive restart.
+        self._persist: Optional[Callable[[list[AccountConfig]], None]] = None
 
     # ---- setup ----
     def set_factory(self, fac: BotFactory) -> None:
@@ -140,14 +143,45 @@ class AccountManager:
     def factory_registered(self) -> bool:
         return self._factory is not None
 
-    def register(self, cfg: AccountConfig) -> AccountState:
+    def set_persistence(self, persist_fn: Callable[[list], None]) -> None:
+        self._persist = persist_fn
+
+    def register(self, cfg: AccountConfig, persist: bool = False) -> AccountState:
         with self._lock:
             if cfg.name in self._accounts:
                 return self._accounts[cfg.name]
             state = AccountState(config=cfg)
             self._accounts[cfg.name] = state
             LOG.info("account registered: %s", cfg.name)
-            return state
+        if persist and self._persist is not None:
+            try:
+                self._persist(self._dynamic_configs())
+            except Exception as e:
+                LOG.warning("persistence callback failed: %s", e)
+        return state
+
+    def unregister(self, name: str) -> tuple[bool, str]:
+        """Remove account from manager. Refuses if status != STOPPED."""
+        with self._lock:
+            state = self._accounts.get(name)
+            if state is None:
+                return False, f"unknown account: {name}"
+            if state.status != AccountStatus.STOPPED:
+                return False, f"cannot remove account in status={state.status.value}; stop it first"
+            del self._accounts[name]
+            LOG.info("account unregistered: %s", name)
+        if self._persist is not None:
+            try:
+                self._persist(self._dynamic_configs())
+            except Exception as e:
+                LOG.warning("persistence callback failed: %s", e)
+        return True, "removed"
+
+    def _dynamic_configs(self) -> list:
+        """Return list of AccountConfig that should be persisted.
+        Currently: all accounts. main.py decides what to write (it skips
+        accounts that came from config.yaml to avoid duplication)."""
+        return [s.config for s in self._accounts.values()]
 
     # ---- lookup ----
     def all(self) -> list[AccountState]:

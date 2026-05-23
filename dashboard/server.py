@@ -9,8 +9,21 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
+from dashboard.accounts import AccountConfig
 from dashboard.state import BotState, get_state
+
+
+class AccountCreate(BaseModel):
+    name: str = Field(..., pattern=r"^[a-zA-Z0-9_\-]{1,32}$",
+                      description="账号唯一标识；只能用字母/数字/_/-")
+    label: str = ""
+    exe: str = ""
+    sidecar_url: str = "http://127.0.0.1:5678"
+    sidecar_repo: str = ""
+    decrypted_db_path: str = ""
+    self_wxid: str = ""
 
 HERE = Path(__file__).parent
 TEMPLATES_DIR = HERE / "templates"
@@ -167,6 +180,31 @@ def create_app(state: Optional[BotState] = None) -> FastAPI:
     @app.get("/api/accounts")
     def api_accounts():
         return {"items": state.accounts.snapshot_all()}
+
+    @app.post("/api/accounts")
+    def api_account_create(body: AccountCreate):
+        if state.accounts.get(body.name) is not None:
+            raise HTTPException(400, f"账号 '{body.name}' 已存在")
+        # Fill in sensible defaults for blank fields
+        decrypted = body.decrypted_db_path or f"./wx/decrypted/{body.name}/contact.db"
+        cfg = AccountConfig(
+            name=body.name,
+            label=body.label or body.name,
+            exe=body.exe,
+            sidecar_url=body.sidecar_url,
+            sidecar_repo=body.sidecar_repo,
+            decrypted_db_path=decrypted,
+            self_wxid=body.self_wxid,
+        )
+        state.accounts.register(cfg, persist=True)
+        return {"ok": True, "msg": f"账号 '{body.name}' 已添加"}
+
+    @app.delete("/api/accounts/{name}")
+    def api_account_delete(name: str):
+        ok, msg = state.accounts.unregister(name)
+        if not ok:
+            raise HTTPException(400, msg)
+        return {"ok": True, "msg": msg}
 
     @app.post("/api/accounts/{name}/start")
     def api_account_start(name: str):

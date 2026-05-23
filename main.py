@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
 import logging
 import signal
 import time
@@ -16,6 +17,39 @@ from dashboard.server import run_in_thread as start_dashboard
 from dashboard.state import get_state
 
 LOG = logging.getLogger("main")
+
+RUNTIME_ACCOUNTS_FILE = Path("data/runtime_accounts.json")
+
+
+def _load_runtime_accounts() -> list[dict]:
+    """Read accounts created via the dashboard UI (in addition to config.yaml)."""
+    if not RUNTIME_ACCOUNTS_FILE.exists():
+        return []
+    try:
+        return json.loads(RUNTIME_ACCOUNTS_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        LOG.warning("failed to read %s: %s", RUNTIME_ACCOUNTS_FILE, e)
+        return []
+
+
+def _make_persister(config_names: set[str]):
+    """Build a persistence callback that writes only dynamically-added accounts
+    (i.e. those NOT in config.yaml) to data/runtime_accounts.json."""
+    def persist(all_cfgs: list[AccountConfig]) -> None:
+        RUNTIME_ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        dynamic = [
+            {
+                "name": c.name, "label": c.label, "exe": c.exe,
+                "sidecar_url": c.sidecar_url, "sidecar_repo": c.sidecar_repo,
+                "decrypted_db_path": c.decrypted_db_path, "self_wxid": c.self_wxid,
+            }
+            for c in all_cfgs if c.name not in config_names
+        ]
+        RUNTIME_ACCOUNTS_FILE.write_text(
+            json.dumps(dynamic, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        LOG.info("persisted %d runtime accounts → %s", len(dynamic), RUNTIME_ACCOUNTS_FILE)
+    return persist
 
 
 def _bootstrap_dashboard(config: Config) -> int:
@@ -85,7 +119,8 @@ def main(chat_type: int, dashboard_only: bool = False, auto_start: bool = False)
     port = _bootstrap_dashboard(config)
     state = get_state()
 
-    # Register all configured accounts
+    # Register accounts from config.yaml
+    config_names: set[str] = set()
     for inst in config.WEIXIN_INSTANCES:
         cfg = AccountConfig(
             name=inst.get("name", "default"),
@@ -97,6 +132,25 @@ def main(chat_type: int, dashboard_only: bool = False, auto_start: bool = False)
             self_wxid=inst.get("self_wxid", ""),
         )
         state.accounts.register(cfg)
+        config_names.add(cfg.name)
+
+    # Then register accounts added at runtime via the dashboard UI
+    for inst in _load_runtime_accounts():
+        if inst.get("name") in config_names:
+            continue   # config.yaml takes precedence
+        cfg = AccountConfig(
+            name=inst.get("name", ""),
+            label=inst.get("label", inst.get("name", "")),
+            exe=inst.get("exe", ""),
+            sidecar_url=inst.get("sidecar_url", "http://127.0.0.1:5678"),
+            sidecar_repo=inst.get("sidecar_repo", ""),
+            decrypted_db_path=inst.get("decrypted_db_path", ""),
+            self_wxid=inst.get("self_wxid", ""),
+        )
+        state.accounts.register(cfg)
+
+    # Wire persistence callback (writes only dynamic accounts to the runtime file)
+    state.accounts.set_persistence(_make_persister(config_names))
 
     # Install the factory so dashboard 'Start' buttons work
     state.accounts.set_factory(_make_bot_factory(config, chat_type))

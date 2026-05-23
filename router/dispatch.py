@@ -5,6 +5,10 @@ from pathlib import Path
 
 from wx.msg import WxMsg
 from router.template import TemplateMatcher, TemplateAction
+from router.commands import (
+    CommandContext, CommandRegistry, build_default_registry,
+    try_handle_filehelper_command,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ class Dispatcher:
         order_handler,
         llm,
         groups_allowed: set[str],
+        command_registry: CommandRegistry | None = None,
     ):
         self.wx = wx
         self.tm = template_matcher
@@ -55,10 +60,17 @@ class Dispatcher:
         self.llm = llm
         self.groups = set(groups_allowed)
         self._self_wxid = wx.get_self_wxid()
+        self.commands = command_registry or build_default_registry()
 
     def handle(self, msg: WxMsg) -> None:
         _safe_record_message(msg)
-        if _is_paused() and not msg.from_self() and msg.type != 37:
+        # Filehelper commands bypass the global pause flag (so /resume works).
+        is_filehelper = (
+            msg.from_self()
+            and msg.receiver == "filehelper"
+            and msg.type == 1
+        )
+        if _is_paused() and not msg.from_self() and msg.type != 37 and not is_filehelper:
             # When paused, ignore message-driven actions but still let
             # self/system events flow (already early-returned in _handle).
             LOG.debug("dispatcher paused; dropping msg %s", msg.id)
@@ -69,6 +81,18 @@ class Dispatcher:
             LOG.error("dispatcher error on msg %s: %s", msg.id, e, exc_info=True)
 
     def _handle(self, msg: WxMsg) -> None:
+        # 0. Filehelper command channel (highest priority).
+        #    Security gates inside try_handle_filehelper_command ensure only
+        #    self-to-filehelper text messages are accepted.
+        try:
+            from dashboard.state import get_state
+            ctx = CommandContext(wx_adapter=self.wx, state=get_state(), account_state=None)
+            if try_handle_filehelper_command(msg, ctx, self.commands):
+                return
+        except Exception as e:
+            LOG.error("filehelper command handling crashed: %s", e, exc_info=True)
+            # Fall through to normal handling
+
         # 1. Self messages: ignore
         if msg.from_self():
             return

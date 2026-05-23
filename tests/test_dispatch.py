@@ -127,3 +127,93 @@ def test_paused_state_still_records_messages(dispatcher, wx, llm):
         assert "should be logged" in contents
     finally:
         reset_state()
+
+
+# ===== filehelper command branch =====
+
+def _filehelper_msg(content, sender="wxid_me", is_self=True):
+    return WxMsg(
+        id=99, type=1, sender=sender, roomid="", content=content,
+        is_self=is_self, ts=0, receiver="filehelper",
+    )
+
+
+def test_filehelper_status_command_replies(dispatcher, wx):
+    from dashboard.state import reset_state, get_state
+    reset_state()
+    dispatcher.handle(_filehelper_msg("/status"))
+    wx.send_text.assert_called_once()
+    text, receiver = wx.send_text.call_args[0][:2]
+    assert "运行中" in text
+    assert receiver == "filehelper"
+
+
+def test_filehelper_pause_command_sets_global_pause(dispatcher, wx):
+    from dashboard.state import reset_state, get_state
+    reset_state()
+    dispatcher.handle(_filehelper_msg("/pause"))
+    assert get_state().paused is True
+    wx.send_text.assert_called_once()
+    assert "已暂停" in wx.send_text.call_args[0][0]
+
+
+def test_filehelper_chinese_alias_works(dispatcher, wx):
+    from dashboard.state import reset_state
+    reset_state()
+    dispatcher.handle(_filehelper_msg("状态"))
+    wx.send_text.assert_called_once()
+    assert "运行中" in wx.send_text.call_args[0][0]
+
+
+def test_filehelper_unknown_slash_gets_hint(dispatcher, wx):
+    from dashboard.state import reset_state
+    reset_state()
+    dispatcher.handle(_filehelper_msg("/nopecmd"))
+    wx.send_text.assert_called_once()
+    assert "未知命令" in wx.send_text.call_args[0][0]
+
+
+def test_filehelper_plain_chitchat_does_nothing(dispatcher, wx, llm):
+    from dashboard.state import reset_state
+    reset_state()
+    dispatcher.handle(_filehelper_msg("自言自语"))
+    wx.send_text.assert_not_called()
+    llm.get_answer.assert_not_called()
+
+
+def test_security_non_self_pause_does_not_pause(dispatcher, wx):
+    """Critical: a stranger DMing /pause must NOT control the bot."""
+    from dashboard.state import reset_state, get_state
+    reset_state()
+    msg = WxMsg(
+        id=1, type=1, sender="wxid_attacker", roomid="", content="/pause",
+        is_self=False, ts=0, receiver="filehelper",
+    )
+    dispatcher.handle(msg)
+    assert get_state().paused is False
+
+
+def test_security_self_in_group_pause_does_not_pause(dispatcher, wx):
+    """Critical: operator typing /pause in a group must NOT pause the bot."""
+    from dashboard.state import reset_state, get_state
+    reset_state()
+    msg = WxMsg(
+        id=1, type=1, sender="wxid_me", roomid="123@chatroom", content="/pause",
+        is_self=True, ts=0, receiver="123@chatroom",
+    )
+    dispatcher.handle(msg)
+    assert get_state().paused is False
+    wx.send_text.assert_not_called()
+
+
+def test_security_self_dm_to_someone_else_pause_does_not_pause(dispatcher, wx):
+    """Critical: even self-message but to a non-filehelper contact must not trigger."""
+    from dashboard.state import reset_state, get_state
+    reset_state()
+    msg = WxMsg(
+        id=1, type=1, sender="wxid_me", roomid="", content="/pause",
+        is_self=True, ts=0, receiver="wxid_friend",
+    )
+    dispatcher.handle(msg)
+    assert get_state().paused is False
+    wx.send_text.assert_not_called()

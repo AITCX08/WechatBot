@@ -152,3 +152,36 @@ def test_factory_registered_property():
     assert m.factory_registered is False
     m.set_factory(lambda c, s: (None, None, None))
     assert m.factory_registered is True
+
+
+def test_on_status_change_fires_on_start():
+    import time as _t
+    m = AccountManager()
+    state = m.register(_cfg("a"))
+    seen = []
+    m.set_on_status_change(lambda name, status: seen.append((name, status.value)))
+
+    def fac(cfg, st): return (MagicMock(), MagicMock(), MagicMock())
+    m.set_factory(fac)
+    m.start("a")
+    for _ in range(20):
+        if seen:
+            break
+        _t.sleep(0.05)
+    assert ("a", "running") in seen
+
+
+def test_on_status_change_fires_on_stop():
+    import time as _t
+    m = AccountManager()
+    state = m.register(_cfg("a"))
+    state.status = AccountStatus.RUNNING
+    state.wx_adapter = MagicMock()
+    seen = []
+    m.set_on_status_change(lambda name, status: seen.append((name, status.value)))
+    m.stop("a")
+    for _ in range(20):
+        if seen:
+            break
+        _t.sleep(0.05)
+    assert ("a", "stopped") in seen

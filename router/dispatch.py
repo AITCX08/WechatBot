@@ -53,6 +53,8 @@ class Dispatcher:
         llm,
         groups_allowed: set[str],
         command_registry: CommandRegistry | None = None,
+        reporter=None,
+        pricing=None,
     ):
         self.wx = wx
         self.tm = template_matcher
@@ -61,6 +63,8 @@ class Dispatcher:
         self.groups = set(groups_allowed)
         self._self_wxid = wx.get_self_wxid()
         self.commands = command_registry or build_default_registry()
+        self.reporter = reporter
+        self.pricing = pricing
 
     def handle(self, msg: WxMsg) -> None:
         _safe_record_message(msg)
@@ -86,7 +90,10 @@ class Dispatcher:
         #    self-to-filehelper text messages are accepted.
         try:
             from dashboard.state import get_state
-            ctx = CommandContext(wx_adapter=self.wx, state=get_state(), account_state=None)
+            ctx = CommandContext(
+                wx_adapter=self.wx, state=get_state(), account_state=None,
+                reporter=self.reporter, pricing=self.pricing,
+            )
             if try_handle_filehelper_command(msg, ctx, self.commands):
                 return
         except Exception as e:

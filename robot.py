@@ -15,6 +15,8 @@ from wx import WxAdapter as Wcf
 from wx import WxMsg
 from router.dispatch import Dispatcher
 from router.order import OrderHandler
+from router.pricing import PricingTable
+from router.reporter import Reporter
 from router.template import TemplateMatcher
 
 from base.func_bard import BardAssistant
@@ -104,12 +106,16 @@ class Robot(Job):
             intent_prompt=intent_prompt,
             extract_prompt=extract_prompt,
         )
+        pricing = PricingTable(getattr(self.config, "PRICING", {}) or {})
+        reporter = Reporter(audit_dir=Path("logs/audit"), pricing=pricing)
         self.dispatcher = Dispatcher(
             wx=self.wcf,
             template_matcher=self.template_matcher,
             order_handler=order_handler,
             llm=self.chat,
             groups_allowed=set(self.config.GROUPS or []),
+            reporter=reporter,
+            pricing=pricing,
         )
 
     @staticmethod

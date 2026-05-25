@@ -134,6 +134,7 @@ class AccountManager:
         # Persistence callback (set by main.py); invoked after register/unregister
         # with the list of accounts that should survive restart.
         self._persist: Optional[Callable[[list[AccountConfig]], None]] = None
+        self._on_status_change: Optional[Callable[[str, AccountStatus], None]] = None
 
     # ---- setup ----
     def set_factory(self, fac: BotFactory) -> None:
@@ -145,6 +146,9 @@ class AccountManager:
 
     def set_persistence(self, persist_fn: Callable[[list], None]) -> None:
         self._persist = persist_fn
+
+    def set_on_status_change(self, cb: Callable[[str, "AccountStatus"], None]) -> None:
+        self._on_status_change = cb
 
     def register(self, cfg: AccountConfig, persist: bool = False) -> AccountState:
         with self._lock:
@@ -217,6 +221,11 @@ class AccountManager:
                 state.status = AccountStatus.RUNNING
                 state.paused = False
                 LOG.info("account %s: running", name)
+                if self._on_status_change is not None:
+                    try:
+                        self._on_status_change(name, AccountStatus.RUNNING)
+                    except Exception:
+                        LOG.warning("on_status_change(RUNNING) failed", exc_info=True)
             except Exception as e:
                 state.status = AccountStatus.ERROR
                 state.last_error = str(e)
@@ -250,6 +259,11 @@ class AccountManager:
                 state.pause_reason = ""
                 state.status = AccountStatus.STOPPED
                 LOG.info("account %s: stopped", name)
+                if self._on_status_change is not None:
+                    try:
+                        self._on_status_change(name, AccountStatus.STOPPED)
+                    except Exception:
+                        LOG.warning("on_status_change(STOPPED) failed", exc_info=True)
             except Exception as e:
                 state.status = AccountStatus.ERROR
                 state.last_error = str(e)

@@ -11,10 +11,13 @@ from pathlib import Path
 from configuration import Config
 from constants import ChatType
 from dashboard import log_handler as dash_log
-from dashboard.accounts import AccountConfig, AccountState
+from dashboard.accounts import AccountConfig, AccountState, AccountStatus
 from dashboard.launcher import ensure_weixin_running
 from dashboard.server import run_in_thread as start_dashboard
 from dashboard.state import get_state
+from router.notifier import Notifier
+from router.pricing import PricingTable
+from router.reporter import Reporter
 
 LOG = logging.getLogger("main")
 
@@ -60,12 +63,15 @@ def _bootstrap_dashboard(config: Config) -> int:
     return port
 
 
-def _make_bot_factory(config: Config, chat_type: int):
+def _make_bot_factory(config: Config, chat_type: int, notifier=None):
     """Build a factory callable that the AccountManager will invoke whenever
     a user clicks 'Start' on an account in the dashboard.
 
     Returns: (wx_adapter, robot, order_handler) tuple — the AccountManager
     stores these on the AccountState and uses them for snapshot/cleanup.
+
+    The optional `notifier` is captured via closure and wired into each
+    per-account OrderHandler after the Robot is constructed.
     """
     # Import bot stack lazily so dashboard can run even without these deps.
     from robot import Robot
@@ -99,6 +105,10 @@ def _make_bot_factory(config: Config, chat_type: int):
             oh = getattr(robot.dispatcher, "order", None)
             if oh is not None:
                 oh.audit_log_path = audit_path
+                # v2: per-account notifier wiring (notifier captured from outer scope)
+                if notifier is not None:
+                    oh.notifier = notifier
+                    oh.account_name = acc_cfg.name
         except Exception as e:
             LOG.warning("[%s] could not switch audit path: %s", acc_cfg.name, e)
 
@@ -152,8 +162,37 @@ def main(chat_type: int, dashboard_only: bool = False, auto_start: bool = False)
     # Wire persistence callback (writes only dynamic accounts to the runtime file)
     state.accounts.set_persistence(_make_persister(config_names))
 
+    # ---- v2 wiring: shared notifier + reporter ----
+    pricing = PricingTable(getattr(config, "PRICING", {}) or {})
+    reporter = Reporter(audit_dir=Path("logs/audit"), pricing=pricing)
+
+    fh_cfg = config.LLM.get("filehelper", {}) if isinstance(config.LLM, dict) else {}
+    if not isinstance(fh_cfg, dict):
+        fh_cfg = {}
+    quiet = tuple(fh_cfg.get("quiet_hours", ())) if fh_cfg.get("quiet_hours") else ()
+
+    def _adapter_for(account_name: str):
+        s = state.accounts.get(account_name)
+        return s.wx_adapter if s else None
+
+    notifier = Notifier(
+        adapter_lookup=_adapter_for,
+        cooldown_sec=int(fh_cfg.get("cooldown_sec", 300)),
+        quiet_hours=quiet,
+    )
+
+    def _on_status_change(name: str, status):
+        if status == AccountStatus.RUNNING:
+            notifier.emit(name, "online", {})
+        elif status == AccountStatus.STOPPED:
+            notifier.emit(name, "offline", {})
+
+    state.accounts.set_on_status_change(_on_status_change)
+    LOG.info("notifier ready (cooldown=%ds quiet_hours=%s)",
+             notifier._cooldown_sec, quiet or "off")
+
     # Install the factory so dashboard 'Start' buttons work
-    state.accounts.set_factory(_make_bot_factory(config, chat_type))
+    state.accounts.set_factory(_make_bot_factory(config, chat_type, notifier=notifier))
 
     LOG.info("注册账号: %s", ", ".join(state.accounts.names()))
     LOG.info("Dashboard: http://127.0.0.1:%d  →  在网页上点 '启动' 即可逐个上线", port)

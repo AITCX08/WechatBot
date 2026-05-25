@@ -33,6 +33,8 @@ class OrderHandler:
         audit_log_path: Path,
         intent_prompt: str,
         extract_prompt: str,
+        notifier=None,
+        account_name: str = "default",
     ):
         self.lexue_creds = lexue_creds
         self.llm = llm
@@ -42,6 +44,8 @@ class OrderHandler:
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.intent_prompt = intent_prompt
         self.extract_prompt = extract_prompt
+        self.notifier = notifier
+        self.account_name = account_name
         self._pending: dict[str, OrderDraft] = {}     # wxid -> draft
         self._history: dict[str, list[str]] = {}      # wxid -> [recent msgs]
         self._daily_count = self._count_today_orders()
@@ -184,6 +188,27 @@ class OrderHandler:
             get_state().audit.append(event)
         except Exception:
             pass
+        # v2: notify filehelper of important order events
+        if self.notifier is not None:
+            ev = event.get("event", "")
+            draft = event.get("draft") or {}
+            payload = {
+                "wxid": draft.get("requester_wxid", ""),
+                "kcname": draft.get("kcname", ""),
+                "msg": event.get("error") or event.get("msg") or "",
+            }
+            mapping = {
+                "place_real": "order_success",
+                "place_dry_run": "order_dry_run",
+                "place_error": "order_failure",
+                "daily_limit_hit": "error",
+            }
+            evt = mapping.get(ev)
+            if evt:
+                try:
+                    self.notifier.emit(self.account_name, evt, payload)
+                except Exception:
+                    pass
 
     def _count_today_orders(self) -> int:
         if not self.audit_log_path.exists():

@@ -144,3 +144,40 @@ def test_max_extract_rounds_aborts(handler, llm, wx):
     handler.on_user_reply(make_msg("依然没说全"))   # 3rd reply → extract_rounds reaches 3 → abort
     # Final state: pending dropped, escalation message sent
     assert not handler.is_pending_for("wxid_alice")
+
+
+def test_audit_calls_notifier_on_place_dry_run(handler, llm, wx):
+    """OrderHandler with notifier attached should emit order_dry_run event."""
+    notif = MagicMock()
+    handler.notifier = notif
+    handler.account_name = "main"
+    llm.get_answer.return_value = json.dumps({
+        "school": "x", "user": "u", "password": "p",
+        "platform": "1736", "kcid": "40", "kcname": "形势与政策",
+        "missing": [],
+    })
+    handler.handle_new_order_message(make_msg("下单"))
+    handler.on_user_reply(make_msg("确认"))
+    emitted = [c[0] for c in notif.emit.call_args_list]
+    assert any(c[1] == "order_dry_run" for c in emitted), f"expected order_dry_run in {emitted}"
+    # Check that account_name is the first arg
+    dry_run_call = next(c for c in emitted if c[1] == "order_dry_run")
+    assert dry_run_call[0] == "main"
+
+
+def test_audit_calls_notifier_on_cancel_does_NOT_emit(handler, llm, wx):
+    """Cancel events are not in the mapping; should not call notifier."""
+    notif = MagicMock()
+    handler.notifier = notif
+    handler.account_name = "main"
+    llm.get_answer.return_value = json.dumps({
+        "school": "x", "user": "u", "password": "p",
+        "platform": "1736", "kcid": "40", "kcname": "k",
+        "missing": [],
+    })
+    handler.handle_new_order_message(make_msg("下单"))
+    handler.on_user_reply(make_msg("取消"))
+    emitted_events = [c[0][1] for c in notif.emit.call_args_list]
+    assert "order_success" not in emitted_events
+    assert "order_dry_run" not in emitted_events
+    # (cancel just writes an audit row with event="cancel" which isn't in the mapping)

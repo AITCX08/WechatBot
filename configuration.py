@@ -76,3 +76,4 @@ class Config(object):
         order_safety_defaults.update(yconfig.get("order_safety", {}))
         self.ORDER_SAFETY = order_safety_defaults
         self.LLM = yconfig.get("llm", {})
+        self.PRICING = yconfig.get("pricing", {})

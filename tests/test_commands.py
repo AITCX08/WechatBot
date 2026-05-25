@@ -7,6 +7,7 @@ from router.commands import (
     CommandContext, CommandRegistry,
     build_default_registry, try_handle_filehelper_command,
     cmd_status, cmd_pause, cmd_resume, cmd_help,
+    cmd_report, cmd_pending, cmd_pricing,
 )
 
 
@@ -179,3 +180,87 @@ def test_try_handle_handler_exception_replies_with_error(ctx):
     ctx.wx_adapter.send_text.assert_called_once()
     assert "执行失败" in ctx.wx_adapter.send_text.call_args[0][0]
     assert "kaboom" in ctx.wx_adapter.send_text.call_args[0][0]
+
+
+# ============ v2 command tests ============
+
+from router.reporter import Reporter
+from router.pricing import PricingTable
+
+
+@pytest.fixture
+def ctx_with_v2_deps(ctx, tmp_path):
+    """Augment ctx with reporter + pricing for v2 tests."""
+    pricing = PricingTable({"default": 5.0, "1736": {"default": 8.0, "形势与政策": 12.0}})
+    reporter = Reporter(audit_dir=tmp_path, pricing=pricing)
+    ctx.reporter = reporter
+    ctx.pricing = pricing
+    ctx.account_state = MagicMock()
+    ctx.account_state.config.name = "main"
+    ctx.account_state.order_handler = None
+    return ctx
+
+
+def test_cmd_report_today_empty(ctx_with_v2_deps):
+    out = cmd_report(ctx_with_v2_deps, "today")
+    assert "今日" in out
+    assert "0" in out
+
+
+def test_cmd_report_default_window_is_today(ctx_with_v2_deps):
+    out = cmd_report(ctx_with_v2_deps, "")
+    assert "今日" in out
+
+
+def test_cmd_report_no_reporter_returns_warning():
+    from router.commands import CommandContext
+    c = CommandContext(wx_adapter=MagicMock(), state=MagicMock(), account_state=None,
+                       reporter=None, pricing=None)
+    out = cmd_report(c, "today")
+    assert "未就绪" in out
+
+
+def test_cmd_pending_empty(ctx_with_v2_deps):
+    oh = MagicMock()
+    oh._pending = {}
+    ctx_with_v2_deps.account_state.order_handler = oh
+    out = cmd_pending(ctx_with_v2_deps, "")
+    assert "无待确认" in out
+
+
+def test_cmd_pending_lists_drafts(ctx_with_v2_deps):
+    oh = MagicMock()
+    draft = MagicMock()
+    draft.requester_wxid = "wxid_a"
+    draft.kcname = "形势与政策"
+    draft.kcid = "40"
+    draft.extract_rounds = 1
+    oh._pending = {"wxid_a": draft}
+    ctx_with_v2_deps.account_state.order_handler = oh
+    out = cmd_pending(ctx_with_v2_deps, "")
+    assert "wxid_a" in out
+    assert "形势与政策" in out
+
+
+def test_cmd_pricing_renders_table(ctx_with_v2_deps):
+    out = cmd_pricing(ctx_with_v2_deps, "")
+    assert "1736" in out
+    assert "形势与政策" in out
+    assert "¥12" in out or "12.00" in out
+
+
+def test_help_includes_new_commands(ctx_with_v2_deps):
+    out = cmd_help(ctx_with_v2_deps, "")
+    assert "/report" in out
+    assert "/pending" in out
+    assert "/pricing" in out
+
+
+def test_registry_has_new_commands():
+    reg = build_default_registry()
+    assert reg.lookup("/report") is not None
+    assert reg.lookup("/pending") is not None
+    assert reg.lookup("/pricing") is not None
+    assert reg.lookup("日报") is not None
+    assert reg.lookup("待确认") is not None
+    assert reg.lookup("价格") is not None

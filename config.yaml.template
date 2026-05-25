@@ -126,3 +126,19 @@ llm:
   chitchat_model: deepseek
   intent_prompt_path: prompts/order_intent.md
   extract_prompt_path: prompts/order_extract.md
+  # Filehelper notifier + report tuning. All optional; defaults shown.
+  # filehelper:
+  #   quiet_hours: [0, 7]            # 0-6 点不推 INFO 级通知（CRITICAL 仍推）
+  #   cooldown_sec: 300              # 同账号+同事件类型的最小间隔
+  #   daily_report_time: "22:00"     # 每日报告推送时间（HH:MM）
+
+# 每平台/每课程的单价配置 — 用于报告里的金额统计。
+# 查找顺序：platform > kcname → platform > default → global default
+pricing:
+  default: 5.0
+  # 1736:                            # 平台编号
+  #   default: 8.0                   # 平台默认价
+  #   "形势与政策": 12.0             # 特定课程价
+  #   "马克思主义基本原理": 10.0
+  # 1800:
+  #   default: 5.0

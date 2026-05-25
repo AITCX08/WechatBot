@@ -4,6 +4,7 @@
 import json
 import logging
 import signal
+import threading
 import time
 from argparse import ArgumentParser
 from pathlib import Path
@@ -124,6 +125,41 @@ def _make_bot_factory(config: Config, chat_type: int, notifier=None):
     return factory
 
 
+def _schedule_daily_reports(state, reporter, fh_cfg: dict) -> None:
+    """Background thread: push each account's daily report at the configured HH:MM."""
+    import schedule
+
+    report_time = (fh_cfg.get("daily_report_time") if isinstance(fh_cfg, dict) else None) or "22:00"
+
+    def _push_for_all():
+        for acc in state.accounts.all():
+            if acc.status.value != "running":
+                continue
+            try:
+                rep = reporter.aggregate(account=acc.name, window="today")
+                text = reporter.render_text(rep)
+                adapter = acc.wx_adapter
+                if adapter is not None:
+                    adapter.send_text(text, "filehelper")
+                    LOG.info("daily report pushed to %s", acc.name)
+            except Exception as e:
+                LOG.warning("daily report for %s failed: %s", acc.name, e)
+
+    schedule.every().day.at(report_time).do(_push_for_all)
+
+    def _runner():
+        while True:
+            try:
+                schedule.run_pending()
+            except Exception as e:
+                LOG.warning("schedule.run_pending crashed: %s", e)
+            time.sleep(30)
+
+    t = threading.Thread(target=_runner, name="DailyReportScheduler", daemon=True)
+    t.start()
+    LOG.info("daily report scheduled at %s", report_time)
+
+
 def main(chat_type: int, dashboard_only: bool = False, auto_start: bool = False):
     config = Config()
     port = _bootstrap_dashboard(config)
@@ -190,6 +226,9 @@ def main(chat_type: int, dashboard_only: bool = False, auto_start: bool = False)
     state.accounts.set_on_status_change(_on_status_change)
     LOG.info("notifier ready (cooldown=%ds quiet_hours=%s)",
              notifier._cooldown_sec, quiet or "off")
+
+    # ---- v2: daily report scheduler ----
+    _schedule_daily_reports(state, reporter, fh_cfg)
 
     # Install the factory so dashboard 'Start' buttons work
     state.accounts.set_factory(_make_bot_factory(config, chat_type, notifier=notifier))

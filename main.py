@@ -125,27 +125,35 @@ def _make_bot_factory(config: Config, chat_type: int, notifier=None):
     return factory
 
 
+def push_daily_report_to_all(state, reporter) -> int:
+    """For every RUNNING account, push today's report to its filehelper.
+
+    Returns the count of accounts the report was actually sent to.
+    Extracted from the scheduler closure so it can be unit-tested.
+    """
+    sent = 0
+    for acc in state.accounts.all():
+        if acc.status.value != "running":
+            continue
+        try:
+            rep = reporter.aggregate(account=acc.name, window="today")
+            text = reporter.render_text(rep)
+            adapter = acc.wx_adapter
+            if adapter is not None:
+                adapter.send_text(text, "filehelper")
+                LOG.info("daily report pushed to %s", acc.name)
+                sent += 1
+        except Exception as e:
+            LOG.warning("daily report for %s failed: %s", acc.name, e)
+    return sent
+
+
 def _schedule_daily_reports(state, reporter, fh_cfg: dict) -> None:
     """Background thread: push each account's daily report at the configured HH:MM."""
     import schedule
 
     report_time = (fh_cfg.get("daily_report_time") if isinstance(fh_cfg, dict) else None) or "22:00"
-
-    def _push_for_all():
-        for acc in state.accounts.all():
-            if acc.status.value != "running":
-                continue
-            try:
-                rep = reporter.aggregate(account=acc.name, window="today")
-                text = reporter.render_text(rep)
-                adapter = acc.wx_adapter
-                if adapter is not None:
-                    adapter.send_text(text, "filehelper")
-                    LOG.info("daily report pushed to %s", acc.name)
-            except Exception as e:
-                LOG.warning("daily report for %s failed: %s", acc.name, e)
-
-    schedule.every().day.at(report_time).do(_push_for_all)
+    schedule.every().day.at(report_time).do(push_daily_report_to_all, state, reporter)
 
     def _runner():
         while True:

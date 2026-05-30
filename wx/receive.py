@@ -9,15 +9,40 @@ from queue import Queue
 
 import requests
 
+from wx.constants import FILEHELPER_WXID
 from wx.msg import WxMsg
 
 LOG = logging.getLogger(__name__)
 
+# wechat-decrypt emits the message type as a Chinese string (format_msg_type,
+# monitor_web.py:567-572). Map it back to the wcferry-style numeric code so the
+# rest of the codebase (dispatch.py / order.py: `msg.type == 1`) keeps working.
+# Verified mapping — see docs/sidecar-verification.md.
+_TYPE_CN_TO_NUM = {
+    "文本": 1,
+    "图片": 3,
+    "语音": 34,
+    "名片": 42,
+    "视频": 43,
+    "表情": 47,
+    "位置": 48,
+    "链接/文件": 49,
+    "通话": 50,
+    "系统": 10000,
+    "撤回": 10002,
+}
+
 
 class ReceiveBackend:
-    """Wraps the wechat-decrypt sidecar. One process per backend instance."""
+    """Wraps the wechat-decrypt sidecar. One process per backend instance.
 
-    SSE_PATH = "/stream"             # path on monitor_web.py; verify in Task 0.3
+    SSE contract verified against sidecar source (docs/sidecar-verification.md):
+    endpoint GET /stream on port 5678, normal new messages are BARE
+    `data: <json>\\n\\n` frames with top-level fields (no event_type/data wrap);
+    async update frames carry an `event` key and are ignored here.
+    """
+
+    SSE_PATH = "/stream"             # verified: monitor_web.py:2850
     HEARTBEAT_TIMEOUT_SEC = 30
     RESTART_BACKOFF_SEC = 5
     MAX_RESTARTS = 3
@@ -89,6 +114,10 @@ class ReceiveBackend:
                     for line in r.iter_lines(decode_unicode=True):
                         if self._stop.is_set():
                             return
+                        # Only data lines carry JSON. 'event:' lines, ':' heartbeat
+                        # comments and blank lines are skipped; the per-frame
+                        # `event` key inside the JSON is what distinguishes async
+                        # update frames (handled in _translate_event).
                         if not line or not line.startswith("data:"):
                             continue
                         try:
@@ -115,20 +144,52 @@ class ReceiveBackend:
             self._queue.put(msg)
 
     def _translate_event(self, event: dict) -> WxMsg | None:
-        if event.get("event_type") != "new_message":
+        """Translate one bare-data-frame payload into a WxMsg.
+
+        Returns None for async-update frames (which carry an `event` key),
+        heartbeats, and malformed payloads. See docs/sidecar-verification.md
+        for the field contract and the semantic gaps SSE does NOT provide
+        (from_user wxid / direction / numeric type / msg_id).
+        """
+        if not isinstance(event, dict):
             return None
-        d = event.get("data") or {}
+        # Async update / tool frames carry an `event` key — not new messages.
+        if "event" in event:
+            return None
+        username = event.get("username")
+        if not username or "timestamp" not in event:
+            return None
+
+        raw_type = event.get("type")
+        if isinstance(raw_type, int):
+            type_num = raw_type
+        else:
+            type_num = _TYPE_CN_TO_NUM.get(str(raw_type), 0)
+        content = str(event.get("content", ""))
         try:
+            ts = int(event.get("timestamp", 0))
+        except (TypeError, ValueError):
+            ts = 0
+
+        # filehelper bridge — the killer adaptation. A message in the filehelper
+        # session is by nature written by the operator (only self can post to
+        # 文件传输助手). SSE carries no direction/receiver, so bridge it so the
+        # command channel keeps working: mark is_self + receiver=filehelper.
+        if username == FILEHELPER_WXID:
             return WxMsg(
-                id=int(d["msg_id"]),
-                type=int(d["type"]),
-                sender=str(d.get("from_user", "")),
-                roomid=str(d.get("room_id", "")),
-                content=str(d.get("content", "")),
-                is_self=bool(d.get("is_send", 0)),
-                ts=int(d.get("timestamp", 0)),
-                receiver=str(d.get("to_user", "")),
+                id=ts, type=type_num, sender=FILEHELPER_WXID, roomid="",
+                content=content, is_self=True, ts=ts, receiver=FILEHELPER_WXID,
             )
-        except (KeyError, ValueError, TypeError) as e:
-            LOG.warning("malformed message event %r: %s", event, e)
-            return None
+
+        # Normal message. SSE gives no sender wxid for groups (only a display
+        # name) and no direction. Map what's available:
+        if bool(event.get("is_group")):
+            sender = str(event.get("sender") or "")  # group-member display name
+            roomid = str(username)
+        else:
+            sender = str(username)                    # 1-on-1: username is peer wxid
+            roomid = ""
+        return WxMsg(
+            id=ts, type=type_num, sender=sender, roomid=roomid,
+            content=content, is_self=False, ts=ts, receiver="",
+        )

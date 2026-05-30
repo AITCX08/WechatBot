@@ -1,67 +1,88 @@
-"""Canned wechat-decrypt SSE events.
+"""Canned wechat-decrypt SSE events — REAL bare-data-frame shape.
 
-The real event schema is discovered during Task 0.3 verification and
-recorded in docs/sidecar-verification.md. These shapes match what we expect:
-each event is a dict with `event_type` and `data` keys.
+Verified against sidecar source (docs/sidecar-verification.md): a normal new
+message is a BARE `data: <json>\\n\\n` frame whose JSON has top-level fields
+time/timestamp/chat/username/is_group/sender/type(Chinese string)/type_icon/
+content/unread/decrypt_ms/pages — NO event_type/data wrapper, NO msg_id/
+from_user/to_user/room_id/is_send. Async update frames carry an `event` key
+(image_update/rich_update/tool_log/tool_done) and must be ignored by the
+message translator.
 """
 
+# --- normal new message: 1-on-1 text ---
 TEXT_DM = {
-    "event_type": "new_message",
-    "data": {
-        "msg_id": 1001,
-        "type": 1,
-        "from_user": "wxid_alice",
-        "to_user": "wxid_self",
-        "room_id": "",
-        "content": "hi bot",
-        "is_send": 0,
-        "timestamp": 1700000000,
-    },
+    "time": "14:23:05",
+    "timestamp": 1700000000,
+    "chat": "小爱",
+    "username": "wxid_alice",    # 1-on-1 → username IS the peer's wxid
+    "is_group": False,
+    "sender": "",                # empty in 1-on-1
+    "type": "文本",              # Chinese string, not a number
+    "type_icon": "💬",
+    "content": "hi bot",
+    "unread": 1,
+    "decrypt_ms": 12.3,
+    "pages": 4,
 }
 
+# --- normal new message: group, contains an @ token ---
 TEXT_GROUP_AT = {
-    "event_type": "new_message",
-    "data": {
-        "msg_id": 1002,
-        "type": 1,
-        "from_user": "wxid_alice",
-        "to_user": "123@chatroom",
-        "room_id": "123@chatroom",
-        "content": "@WxBot help",
-        "is_send": 0,
-        "timestamp": 1700000010,
-    },
+    "time": "14:23:10",
+    "timestamp": 1700000010,
+    "chat": "测试群",
+    "username": "123@chatroom",  # group → username is the room id
+    "is_group": True,
+    "sender": "张三",            # group-member display name (NOT a wxid)
+    "type": "文本",
+    "type_icon": "💬",
+    "content": "@WxBot help",
+    "unread": 2,
+    "decrypt_ms": 9.1,
+    "pages": 2,
 }
 
-FRIEND_REQUEST = {
-    "event_type": "new_message",
-    "data": {
-        "msg_id": 1003,
-        "type": 37,
-        "from_user": "wxid_new",
-        "to_user": "wxid_self",
-        "room_id": "",
-        "content": "<msg encryptusername='v3_xxx' ticket='v4_xxx' scene='14' />",
-        "is_send": 0,
-        "timestamp": 1700000020,
-    },
+# --- normal new message: image (type maps to numeric 3) ---
+IMAGE_DM = {
+    "time": "14:23:20",
+    "timestamp": 1700000020,
+    "chat": "小爱",
+    "username": "wxid_alice",
+    "is_group": False,
+    "sender": "",
+    "type": "图片",
+    "type_icon": "🖼️",
+    "content": "",
+    "unread": 1,
+    "decrypt_ms": 30.0,
+    "pages": 8,
 }
 
-SELF_MESSAGE = {
-    "event_type": "new_message",
-    "data": {
-        "msg_id": 1004,
-        "type": 1,
-        "from_user": "wxid_self",
-        "to_user": "wxid_alice",
-        "room_id": "",
-        "content": "I'm replying",
-        "is_send": 1,
-        "timestamp": 1700000030,
-    },
+# --- operator's own message to 文件传输助手 (filehelper command channel) ---
+FILEHELPER_CMD = {
+    "time": "14:23:30",
+    "timestamp": 1700000030,
+    "chat": "文件传输助手",
+    "username": "filehelper",    # filehelper session → only self can write here
+    "is_group": False,
+    "sender": "",
+    "type": "文本",
+    "type_icon": "💬",
+    "content": "/status",
+    "unread": 0,
+    "decrypt_ms": 5.0,
+    "pages": 1,
 }
 
-UNRELATED_EVENT = {
-    "event_type": "key_refreshed",
-    "data": {"timestamp": 1700000040},
+# --- async update frame: must be IGNORED by the message translator ---
+IMAGE_UPDATE = {
+    "event": "image_update",
+    "timestamp": 1700000020,
+    "username": "wxid_alice",
+    "image_url": "/img/abcd1234.jpg",
+}
+
+# --- another async frame (tool log) — ignored ---
+TOOL_LOG = {
+    "event": "tool_log",
+    "line": "decrypting...",
 }

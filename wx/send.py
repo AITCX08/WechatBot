@@ -7,6 +7,7 @@ from threading import Lock
 import pyperclip
 import uiautomation as uia
 
+from wx.constants import FILEHELPER_WXID
 from wx.contacts import ContactsBackend
 
 LOG = logging.getLogger(__name__)
@@ -20,6 +21,13 @@ class SendBackend:
     PER_SEND_INTERVAL_SEC = 0.8       # throttle to avoid risk control
     OPEN_CHAT_TIMEOUT_SEC = 5
     POST_OPEN_SETTLE_SEC = 0.3
+
+    # Built-in WeChat pseudo-contacts that are NOT rows in the contact table.
+    # Without this, send_text("filehelper", ...) can't resolve a display name
+    # and the whole filehelper command-reply channel is dead (review issue #0).
+    BUILTIN_NAMES = {
+        FILEHELPER_WXID: "文件传输助手",
+    }
 
     def __init__(self, weixin_exe: Path, contacts: ContactsBackend):
         self._exe = Path(weixin_exe)
@@ -41,13 +49,38 @@ class SendBackend:
             "Make sure Weixin is running and logged in."
         )
 
+    # ---- recipient resolution ----
+    def _resolve_display(self, receiver_wxid: str) -> str | None:
+        """Resolve a wxid/roomid into a search-box-usable display name.
+
+        Returns None when the recipient cannot be opened via the search box:
+          - unknown contact (not in the decrypted DB)
+          - a raw 'xxx@chatroom' id (group with no remark/nick_name) — the
+            internal room id is NOT a searchable conversation label, so pasting
+            it would open the wrong/no chat (review issue #2).
+        Built-in pseudo-contacts (filehelper) are resolved here since they are
+        not rows in the contact table (review issue #0).
+        """
+        if not receiver_wxid:
+            return None
+        builtin = self.BUILTIN_NAMES.get(receiver_wxid)
+        if builtin:
+            return builtin
+        display = self._contacts.wxid_to_name(receiver_wxid)
+        if not display:
+            return None
+        if display.endswith("@chatroom"):
+            # raw room-id fallback fired → not searchable
+            return None
+        return display
+
     # ---- public ----
     def send_text(
         self, receiver_wxid: str, msg: str, at_wxids: tuple[str, ...] = ()
     ) -> bool:
-        display = self._contacts.wxid_to_name(receiver_wxid)
+        display = self._resolve_display(receiver_wxid)
         if not display:
-            LOG.error("send_text: no display name for %s", receiver_wxid)
+            LOG.error("send_text: cannot resolve a searchable name for %s", receiver_wxid)
             return False
         with self._send_lock:
             self._throttle()
@@ -64,8 +97,9 @@ class SendBackend:
                 return False
 
     def send_image(self, receiver_wxid: str, image_path: Path) -> bool:
-        display = self._contacts.wxid_to_name(receiver_wxid)
+        display = self._resolve_display(receiver_wxid)
         if not display:
+            LOG.error("send_image: cannot resolve a searchable name for %s", receiver_wxid)
             return False
         with self._send_lock:
             self._throttle()
@@ -141,10 +175,29 @@ class SendBackend:
         time.sleep(0.4)   # wait for search results to populate
         uia.SendKeys("{Enter}", waitTime=0.05)
         time.sleep(self.POST_OPEN_SETTLE_SEC)
+        # KNOWN LIMITATION (review issue #3, needs_phone): search+Enter selects
+        # the FIRST result, which for duplicate/prefix-matching names may be the
+        # wrong conversation. A robust fix reads the opened chat's title bar and
+        # verifies it equals display_name — but the title-bar control locator
+        # can only be validated against a real Weixin client, so it is left as a
+        # documented真机 task (docs/uia-anchors.md) rather than speculative code.
+
+    @staticmethod
+    def _pick_input_edit(edits: list) -> object | None:
+        """Choose the message-input EditControl from a list of Edit controls.
+
+        The search box is ALSO an EditControl, so naively taking the last Edit
+        can land the reply in the search box (review issue #4). Exclude any Edit
+        named '搜索', then take the bottom-most remaining one (the chat input
+        sits at the bottom of the window).
+        """
+        candidates = [e for e in edits if getattr(e, "Name", "") != "搜索"]
+        if not candidates:
+            return None
+        return candidates[-1]
 
     def _focus_input(self) -> None:
-        # The message input is the bottom-most EditControl in the chat pane.
-        # Heuristic: take the last EditControl encountered.
+        # Collect all EditControls, then pick the real input (not the search box).
         edits = []
 
         def _collect(ctrl, depth):
@@ -152,9 +205,10 @@ class SendBackend:
                 edits.append(ctrl)
 
         uia.WalkControl(self._main, _collect, maxDepth=15)
-        if not edits:
-            raise RuntimeError("no EditControl found for message input")
-        edits[-1].Click(simulateMove=False)
+        target = self._pick_input_edit(edits)
+        if target is None:
+            raise RuntimeError("no usable EditControl found for message input")
+        target.Click(simulateMove=False)
         time.sleep(0.1)
 
     def _paste_and_send(self, text: str) -> None:

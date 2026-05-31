@@ -91,3 +91,51 @@ def test_enqueue_filters_async_frames(backend, queue):
     assert m2.roomid == "123@chatroom"
     with pytest.raises(Empty):
         queue.get_nowait()
+
+
+# ---- heartbeat / liveness (review issue #1) ----
+
+class _FakeProc:
+    """Stand-in for a running subprocess: poll() None == alive."""
+    def poll(self):
+        return None
+
+
+def test_heartbeat_line_keeps_alive(backend, monkeypatch):
+    # A healthy sidecar emits ': hb' every 15s with no new messages. is_alive()
+    # must treat ANY line (incl. heartbeat) as proof of life, not only delivered
+    # messages — otherwise a quiet-but-healthy sidecar is wrongly marked dead.
+    backend._proc = _FakeProc()
+    t = [1000.0]
+    monkeypatch.setattr("wx.receive.time.time", lambda: t[0])
+
+    backend._note_line()          # heartbeat / any SSE line arrives at t=1000
+    t[0] = 1000.0 + 25            # 25s later, still < 30s timeout, no new message
+    assert backend.is_alive() is True
+
+
+def test_no_lines_for_timeout_marks_dead(backend, monkeypatch):
+    backend._proc = _FakeProc()
+    t = [1000.0]
+    monkeypatch.setattr("wx.receive.time.time", lambda: t[0])
+
+    backend._note_line()
+    t[0] = 1000.0 + 31            # past HEARTBEAT_TIMEOUT_SEC with zero traffic
+    assert backend.is_alive() is False
+
+
+def test_message_also_counts_as_liveness(backend, monkeypatch):
+    backend._proc = _FakeProc()
+    t = [2000.0]
+    monkeypatch.setattr("wx.receive.time.time", lambda: t[0])
+    backend._consume_event(evs.TEXT_DM)   # delivering a message refreshes liveness
+    t[0] = 2000.0 + 10
+    assert backend.is_alive() is True
+
+
+def test_dead_when_proc_exited(backend):
+    class _Exited:
+        def poll(self):
+            return 1   # non-None == process exited
+    backend._proc = _Exited()
+    assert backend.is_alive() is False

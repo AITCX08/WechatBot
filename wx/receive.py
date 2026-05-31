@@ -59,7 +59,8 @@ class ReceiveBackend:
         self._proc: subprocess.Popen | None = None
         self._sse_thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._last_event_ts = 0.0
+        self._last_event_ts = 0.0   # last delivered message
+        self._last_line_ts = 0.0    # last ANY line incl. heartbeat (liveness)
         self._restart_count = 0
 
     # ---- lifecycle ----
@@ -85,9 +86,18 @@ class ReceiveBackend:
     def is_alive(self) -> bool:
         if self._proc is None or self._proc.poll() is not None:
             return False
-        if self._last_event_ts == 0.0:
-            return True   # not yet received first event; grace period
-        return (time.time() - self._last_event_ts) < self.HEARTBEAT_TIMEOUT_SEC
+        # Liveness = any SSE line (heartbeat OR message) within the timeout.
+        # The sidecar emits ': hb' every 15s on idle (monitor_web.py:2863-2868),
+        # so a quiet-but-healthy connection keeps refreshing _last_line_ts even
+        # with zero new messages (review issue #1).
+        last = max(self._last_event_ts, self._last_line_ts)
+        if last == 0.0:
+            return True   # not yet received anything; grace period
+        return (time.time() - last) < self.HEARTBEAT_TIMEOUT_SEC
+
+    def _note_line(self) -> None:
+        """Record that the SSE stream produced a line (incl. heartbeat)."""
+        self._last_line_ts = time.time()
 
     # ---- subprocess + SSE ----
     def _spawn_sidecar(self) -> None:
@@ -114,6 +124,11 @@ class ReceiveBackend:
                     for line in r.iter_lines(decode_unicode=True):
                         if self._stop.is_set():
                             return
+                        # ANY line (heartbeat ': hb', 'event:' frames, blank
+                        # keep-alives) proves the stream is alive — record it for
+                        # is_alive() before filtering down to data lines.
+                        if line is not None:
+                            self._note_line()
                         # Only data lines carry JSON. 'event:' lines, ':' heartbeat
                         # comments and blank lines are skipped; the per-frame
                         # `event` key inside the JSON is what distinguishes async

@@ -172,7 +172,17 @@ class ReceiveBackend:
         if "event" in event:
             return None
         username = event.get("username")
-        if not username or "timestamp" not in event:
+        if not username:
+            return None
+        # timestamp must be present AND parseable — a dirty ts is a bad frame,
+        # not a t=0 message (review issue #8: silent collapse to id=ts=0).
+        if "timestamp" not in event:
+            return None
+        try:
+            ts = int(event["timestamp"])
+        except (TypeError, ValueError):
+            LOG.warning("dropping frame with unparseable timestamp: %r",
+                        event.get("timestamp"))
             return None
 
         raw_type = event.get("type")
@@ -181,16 +191,15 @@ class ReceiveBackend:
         else:
             type_num = _TYPE_CN_TO_NUM.get(str(raw_type), 0)
         content = str(event.get("content", ""))
-        try:
-            ts = int(event.get("timestamp", 0))
-        except (TypeError, ValueError):
-            ts = 0
+        is_group = bool(event.get("is_group"))
 
         # filehelper bridge — the killer adaptation. A message in the filehelper
         # session is by nature written by the operator (only self can post to
         # 文件传输助手). SSE carries no direction/receiver, so bridge it so the
         # command channel keeps working: mark is_self + receiver=filehelper.
-        if username == FILEHELPER_WXID:
+        # Guard with `not is_group` so a group whose id literally equals
+        # 'filehelper' can't be privileged into a self-command (review issue #6).
+        if username == FILEHELPER_WXID and not is_group:
             return WxMsg(
                 id=ts, type=type_num, sender=FILEHELPER_WXID, roomid="",
                 content=content, is_self=True, ts=ts, receiver=FILEHELPER_WXID,
@@ -198,7 +207,7 @@ class ReceiveBackend:
 
         # Normal message. SSE gives no sender wxid for groups (only a display
         # name) and no direction. Map what's available:
-        if bool(event.get("is_group")):
+        if is_group:
             sender = str(event.get("sender") or "")  # group-member display name
             roomid = str(username)
         else:

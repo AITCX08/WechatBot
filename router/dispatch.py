@@ -120,9 +120,15 @@ class Dispatcher:
 
         receiver = msg.roomid if msg.from_group() else msg.sender
 
+        # The order flow keys _pending/cooldown/audit by msg.sender and replies
+        # to it. In a group the sidecar only gives `sender` as a DISPLAY NAME,
+        # not a stable wxid (review issue #4), so order tracking would mis-key
+        # and reply to the wrong target. Restrict the order flow to DMs.
+        order_eligible = not msg.from_group()
+
         # 4. Order pending: any reply from a sender with an open draft goes
         #    to the order handler (covers confirm/cancel/correction)
-        if self.order.is_pending_for(msg.sender):
+        if order_eligible and self.order.is_pending_for(msg.sender):
             self.order.on_user_reply(msg)
             return
 
@@ -134,7 +140,7 @@ class Dispatcher:
             return
 
         # 6. Order intent classifier
-        if msg.type == 1 and self.order.looks_like_order_intent(msg.content):
+        if order_eligible and msg.type == 1 and self.order.looks_like_order_intent(msg.content):
             self.order.handle_new_order_message(msg)
             return
 

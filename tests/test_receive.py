@@ -139,3 +139,43 @@ def test_dead_when_proc_exited(backend):
             return 1   # non-None == process exited
     backend._proc = _Exited()
     assert backend.is_alive() is False
+
+
+# ---- filehelper bridge needs an is_group guard (review issue #6) ----
+
+def test_filehelper_bridge_skipped_for_group(backend):
+    # A group whose id literally equals 'filehelper' must NOT be privileged into
+    # a self-command; only a real 1-on-1 filehelper session is the operator.
+    ev = {
+        "username": "filehelper", "is_group": True, "sender": "张三",
+        "timestamp": 1700000000, "type": "文本", "content": "/pause",
+    }
+    msg = backend._translate_event(ev)
+    assert msg is not None
+    assert msg.is_self is False          # not bridged
+    assert msg.roomid == "filehelper"    # treated as a normal group
+
+
+def test_filehelper_bridge_applies_for_dm(backend):
+    ev = {
+        "username": "filehelper", "is_group": False,
+        "timestamp": 1700000000, "type": "文本", "content": "/status",
+    }
+    msg = backend._translate_event(ev)
+    assert msg.is_self is True
+    assert msg.receiver == "filehelper"
+
+
+# ---- dirty timestamp is a bad frame (review issue #8) ----
+
+def test_unparseable_timestamp_dropped(backend):
+    for bad in (None, "", "abc", "12x"):
+        ev = {"username": "wxid_x", "timestamp": bad, "type": "文本", "content": "hi"}
+        assert backend._translate_event(ev) is None, f"ts={bad!r} should drop"
+
+
+def test_numeric_string_timestamp_ok(backend):
+    ev = {"username": "wxid_x", "timestamp": "1700000000", "type": "文本", "content": "hi"}
+    msg = backend._translate_event(ev)
+    assert msg is not None
+    assert msg.ts == 1700000000

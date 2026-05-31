@@ -217,3 +217,46 @@ def test_security_self_dm_to_someone_else_pause_does_not_pause(dispatcher, wx):
     dispatcher.handle(msg)
     assert get_state().paused is False
     wx.send_text.assert_not_called()
+
+
+# ---- group order guard (review issue #4) ----
+# In a group, sidecar gives `sender` as a DISPLAY NAME, not a wxid. Routing
+# such a message into the order handler would key _pending/cooldown/audit by a
+# Chinese nickname and reply to the wrong target — so group messages must NOT
+# enter order collection. (@-bot in an allowed group still gets template/LLM.)
+
+def test_group_order_intent_not_routed_to_order(dispatcher, wx, order_handler, tm):
+    from dashboard.state import reset_state
+    reset_state()
+    order_handler.looks_like_order_intent.return_value = True
+    tm.match.return_value = []
+    msg = WxMsg(
+        id=1, type=1, sender="张三", roomid="123@chatroom",
+        content="@WxBot 下单 形势与政策", is_self=False, ts=0,
+    )
+    dispatcher.handle(msg)
+    order_handler.handle_new_order_message.assert_not_called()
+
+
+def test_group_pending_not_routed_to_order(dispatcher, wx, order_handler, tm):
+    from dashboard.state import reset_state
+    reset_state()
+    order_handler.is_pending_for.return_value = True   # would-be pending
+    tm.match.return_value = []
+    msg = WxMsg(
+        id=1, type=1, sender="张三", roomid="123@chatroom",
+        content="@WxBot 确认", is_self=False, ts=0,
+    )
+    dispatcher.handle(msg)
+    order_handler.on_user_reply.assert_not_called()
+
+
+def test_dm_order_intent_still_routed(dispatcher, wx, order_handler, tm):
+    from dashboard.state import reset_state
+    reset_state()
+    order_handler.looks_like_order_intent.return_value = True
+    tm.match.return_value = []
+    msg = WxMsg(id=1, type=1, sender="wxid_alice", roomid="",
+                content="下单 形势与政策", is_self=False, ts=0)
+    dispatcher.handle(msg)
+    order_handler.handle_new_order_message.assert_called_once()

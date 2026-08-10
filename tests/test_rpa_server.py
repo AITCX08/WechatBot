@@ -120,3 +120,40 @@ def test_health_is_unauthenticated_and_safe(app_and_queue):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_disabled_service_refuses_to_build_runtime(monkeypatch):
+    from rpa.__main__ import build_runtime
+
+    monkeypatch.setenv("WECHAT_RPA_API_KEY", "key")
+
+    with pytest.raises(RuntimeError, match="rpa.enabled"):
+        build_runtime(
+            {"enabled": False},
+            {"exe": "C:/x", "decrypted_db_path": "C:/db"},
+        )
+
+
+def test_runtime_uses_validated_loopback_settings_without_running_uvicorn(monkeypatch):
+    from rpa import __main__ as entrypoint
+
+    class StubSender:
+        def __init__(self, weixin_exe, db_path):
+            self.weixin_exe = weixin_exe
+            self.db_path = db_path
+
+        def send_text(self, recipient, text):
+            pass
+
+    monkeypatch.setattr(entrypoint, "UiAutomationTextSender", StubSender)
+    monkeypatch.setenv("WECHAT_RPA_API_KEY", "key")
+
+    settings, queue, app = entrypoint.build_runtime(
+        {"enabled": True},
+        {"exe": "C:/x", "decrypted_db_path": "C:/db"},
+    )
+    try:
+        assert settings.host == "127.0.0.1"
+        assert app.title == "WeChatRobot Local RPA"
+    finally:
+        queue.stop()

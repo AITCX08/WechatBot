@@ -283,6 +283,42 @@ pytest tests/ -v
 
 ---
 
+## Local RPA text send service
+
+This optional service accepts **one text message at a time** and controls only an
+already-running, already-logged-in PC Weixin client through the existing UI
+Automation sender. It does not start, stop, restart, inject into, or use a
+private protocol for Weixin.
+
+1. Keep the default `rpa.enabled: false` in `config.yaml` until the local
+   setup has been reviewed. When enabling it, keep `host: "127.0.0.1"` and
+   start with the sole default allowlist recipient, `filehelper`.
+2. Set a local shell-only API key; do not place it in `config.yaml`:
+
+   ```powershell
+   $env:WECHAT_RPA_API_KEY = "replace-with-a-long-random-local-secret"
+   ```
+
+3. Start the service from this repository:
+
+   ```powershell
+   python -m rpa
+   ```
+
+4. Confirm the local listener before submitting any message:
+
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:9922/health
+   ```
+
+The service binds only to `127.0.0.1`. It requires a logged-in Weixin desktop
+window and a readable configured contact DB when a send is requested. API
+requests require the `X-API-Key` header, recipients must be explicitly
+allowlisted, and responses/audit data omit message text. Do not use it to send
+messages until the operator has explicitly authorized the individual send.
+
+---
+
 ## License
 
 MIT。本项目仅供学习交流，禁止商用/灰产；微信账号风险由使用者承担。

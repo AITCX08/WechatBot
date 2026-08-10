@@ -109,6 +109,15 @@ weixin:
   #     sidecar_repo: "./wx/sidecar/wechat-decrypt"
   #     decrypted_db_path: "./wx/decrypted/support/contact.db"
 
+rpa:
+  enabled: false
+  host: "127.0.0.1"
+  port: 9922
+  api_key_env: "WECHAT_RPA_API_KEY"
+  allowed_recipients: ["filehelper"]
+  max_text_length: 2000
+  idempotency_ttl_sec: 300
+
 lexue:
   user: "1492246"
   pass: "IZ0IPKM5pYPhhGqy"

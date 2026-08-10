@@ -50,6 +50,7 @@ class Config(object):
             self.ZhiPu = None
 
         self.WEIXIN = yconfig.get("weixin", {})
+        self.RPA = yconfig.get("rpa", {})
         # weixin.instances is the new multi-account config. If absent, we
         # synthesize a single "default" account from the legacy weixin.* fields
         # so existing config files keep working.
